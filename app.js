@@ -8,6 +8,7 @@ const rotateBtn = document.getElementById('rotate-page-btn');
 const rearrangePagesBtn = document.getElementById('rearrange-pages-btn');
 const watermarkBtn = document.getElementById('watermark-btn');
 const compressBtn = document.getElementById('compress-btn');
+const mergePdfBtn = document.getElementById('merge-pdf-btn');
 
 const watermarkProperties = {
     fontSize: 50,
@@ -357,3 +358,39 @@ function drawWatermark(context, text, width, height, isCanvas = true) {
         });
     }
 }
+
+mergePdfBtn.addEventListener('click', async () => {
+    if (!pdfDoc) {
+        alert('Please select the first PDF file before merging.');
+        return;
+    }
+
+    // Prompt the user to select the second PDF
+    const secondFileInput = document.createElement('input');
+    secondFileInput.type = 'file';
+    secondFileInput.accept = 'application/pdf';
+    secondFileInput.onchange = async (event) => {
+        const secondFile = event.target.files[0];
+        if (!secondFile) return;
+
+        const secondArrayBuffer = await secondFile.arrayBuffer();
+        const secondPdfDoc = await PDFLib.PDFDocument.load(new Uint8Array(secondArrayBuffer));
+
+        // Copy pages from the second PDF into the first
+        const secondPdfPages = await pdfDoc.copyPages(
+            secondPdfDoc,
+            secondPdfDoc.getPageIndices()
+        );
+        secondPdfPages.forEach((page) => pdfDoc.addPage(page));
+
+        // Update the rendering and page counter
+        pdfBytes = await pdfDoc.save();
+        pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+        renderPDF();
+        updatePageCounter();
+
+        alert('PDFs have been merged successfully!');
+    };
+
+    secondFileInput.click();
+});
