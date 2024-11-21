@@ -1,0 +1,65 @@
+body {
+    background-color: #f8f9fa;
+    padding: 20px;
+  }
+  
+  #pdf-container {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  
+  .page-container {
+    position: relative;
+    margin: 10px;
+    border: 1px solid #ccc;
+    padding: 10px;
+    background-color: white;
+  }
+  
+  .page-container canvas {
+    display: block;
+    margin: 0 auto;
+  }
+  
+  .delete-btn, .add-text-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    cursor: pointer;
+    padding: 5px 10px;
+  }
+  
+  .delete-btn:hover, .add-text-btn:hover {
+    background-color: #b02a37;
+  }
+  
+  .zoom-controls {
+    margin-bottom: 20px;
+  }
+  
+  .thumbnail {
+    height: 100px;
+    cursor: pointer;
+  }
+  
+  .dark-mode {
+    margin-bottom: 20px;
+  }
+  
+  /* Dark mode styling */
+  body.bg-dark {
+    background-color: #343a40;
+    color: #f8f9fa;
+  }
+  
+  body.bg-dark .page-container {
+    background-color: #495057;
+  }
+  
+  body.bg-dark .delete-btn {
+    background-color: #b02a37;
+  }
+  
