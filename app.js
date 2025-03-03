@@ -68,39 +68,39 @@ fileInput.addEventListener('change', async (event) => {
 
 // Update the renderPDF function to account for the current page order
 async function renderPDF() {
-    pdfContainer.innerHTML = ''; // Clear previous PDF content
+    // Show the loading screen with a custom message
+    showLoadingScreen('Rendering PDF...');
+
+    // Clear the PDF container to remove any previous content
+    pdfContainer.innerHTML = '';
 
     const pageCount = pdfDoc.getPageCount();
-    const newPageOrder = Array.from({ length: pageCount }, (_, i) => i); // Create an array of indices
+    const newPageOrder = Array.from({ length: pageCount }, (_, i) => i); // Array of page indices
 
-    // Render each page in the new order
     for (let i = 0; i < newPageOrder.length; i++) {
-        const pageIndex = newPageOrder[i]; // Get the index based on new order
+        const pageIndex = newPageOrder[i]; // Current page index in the new order
 
         if (deletedPages.has(pageIndex)) continue; // Skip deleted pages
 
-        const page = await pdfJsDoc.getPage(pageIndex + 1); // Get the page
-        const rotation = rotations[pageIndex] || 0; // Get the rotation angle, default to 0
-        const viewport = page.getViewport({ scale: 1.5, rotation });
+        const page = await pdfJsDoc.getPage(pageIndex + 1); // Load the page using PDF.js
+        const rotation = rotations[pageIndex] || 0; // Get rotation angle, default to 0
+        const viewport = page.getViewport({ scale: 1.5, rotation }); // Adjust scale and rotation
 
         // Create a container for the page and delete button
         const pageContainer = document.createElement('div');
         pageContainer.classList.add('page-container');
 
-        // Create canvas element to render the page
+        // Create canvas to render the page
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        const context = canvas.getContext('2d');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
 
-        // Render the page into the canvas context
-        const renderContext = {
-            canvasContext: context,
-            viewport: viewport
-        };
+        // Render the page into the canvas
+        const renderContext = { canvasContext: context, viewport: viewport };
         await page.render(renderContext).promise;
 
-        // Draw watermark if it exists
+        // Apply watermark if specified
         if (watermarkText) {
             drawWatermark(context, watermarkText, viewport.width, viewport.height);
         }
@@ -110,13 +110,20 @@ async function renderPDF() {
         deleteBtn.innerText = 'Delete Page';
         deleteBtn.onclick = () => deletePage(pageIndex);
 
-        // Add the canvas and button to the page container
+        // Append canvas and delete button to the page container
         pageContainer.appendChild(canvas);
         pageContainer.appendChild(deleteBtn);
         pdfContainer.appendChild(pageContainer);
+
+        // Update progress on the loading screen
+        const progress = Math.round(((i + 1) / pageCount) * 100);
+        updateProgress(progress);
     }
 
-    // Show the save button once PDF is rendered
+    // Hide the loading screen once rendering is complete
+    hideLoadingScreen();
+
+    // Display the save button after rendering
     saveBtn.style.display = 'block';
 }
 
@@ -169,6 +176,7 @@ saveBtn.addEventListener('click', async () => {
 
 // Helper function to download the PDF
 function downloadPdf(modifiedPdfBytes, filename) {
+    console.log('Preparing PDF for download...');
     const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -177,7 +185,9 @@ function downloadPdf(modifiedPdfBytes, filename) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    console.log(`PDF downloaded as ${filename}.`);
 }
+
 
 // Split PDF functionality
 splitBtn.addEventListener('click', async () => {
@@ -251,7 +261,7 @@ pdfToImageBtn.addEventListener('click', async () => {
         canvas.width = viewport.width;
         canvas.height = viewport.height;
 
-        const context = canvas.getContext('2d');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
         const renderContext = {
             canvasContext: context,
             viewport: viewport,
@@ -394,3 +404,120 @@ mergePdfBtn.addEventListener('click', async () => {
 
     secondFileInput.click();
 });
+
+compressBtn.addEventListener('click', async () => {
+    if (!pdfJsDoc) {
+        alert('Please upload a PDF before compressing.');
+        return;
+    }
+
+    console.log('Compress PDF button clicked.');
+    showLoadingScreen('Compressing PDF...');
+
+    try {
+        const compressedPdfDoc = await PDFLib.PDFDocument.create();
+        console.log('Created new PDF document for compression.');
+
+        const totalPages = pdfJsDoc.numPages;
+
+        for (let i = 1; i <= totalPages; i++) {
+            console.log(`Processing page ${i} of ${totalPages}...`);
+
+            // Get the page from PDF.js
+            const page = await pdfJsDoc.getPage(i);
+
+            // Render the page to a canvas
+            const viewport = page.getViewport({ scale: 2 }); // Adjust scale for higher quality
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            console.log(`Page ${i} rendered to canvas.`);
+
+            // Compress the canvas to a JPEG image
+            const compressedImageData = await compressCanvasImage(canvas, {
+                maxWidth: 1000, // Adjust to desired maximum width
+                quality: 0.7,  // Adjust JPEG quality
+            });
+
+            console.log(`Page ${i} compressed as image.`);
+
+            // Embed the compressed image as a new page in PDF-lib
+            const pageWidth = viewport.width / 2; // Adjust scale factor
+            const pageHeight = viewport.height / 2;
+            const pdfPage = compressedPdfDoc.addPage([pageWidth, pageHeight]);
+
+            const embeddedImage = await compressedPdfDoc.embedJpg(compressedImageData);
+            pdfPage.drawImage(embeddedImage, {
+                x: 0,
+                y: 0,
+                width: pageWidth,
+                height: pageHeight,
+            });
+
+            console.log(`Page ${i} embedded in the new PDF.`);
+            // Update progress
+            const progress = Math.round((i / totalPages) * 100);
+            updateProgress(progress);
+        }
+
+        console.log('All pages processed. Saving compressed PDF...');
+
+        // Save the compressed PDF
+        const compressedPdfBytes = await compressedPdfDoc.save({
+            useObjectStreams: false,
+        });
+
+        console.log('Compressed PDF saved. Initiating download...');
+        downloadPdf(compressedPdfBytes, 'compressed.pdf');
+
+        alert('PDF compressed and downloaded successfully!');
+    } catch (error) {
+        console.error('Error during compression:', error);
+        alert('An error occurred while compressing the PDF.');
+    } finally {
+        hideLoadingScreen();
+    }
+});
+
+
+async function compressCanvasImage(canvas, options) {
+    return new Promise((resolve, reject) => {
+        canvas.toBlob(
+            (blob) => {
+                if (blob) {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(new Uint8Array(reader.result));
+                    reader.readAsArrayBuffer(blob);
+                } else {
+                    reject('Failed to compress canvas image');
+                }
+            },
+            'image/jpeg',
+            options.quality
+        );
+    });
+}
+
+function showLoadingScreen(message) {
+    const loadingScreen = document.getElementById('loading-screen');
+    const loadingMessage = document.getElementById('loading-message');
+    const progressBarFill = document.getElementById('progress-bar-fill');
+
+    loadingMessage.textContent = message;
+    progressBarFill.style.width = '0%'; // Reset the progress bar
+    loadingScreen.style.display = 'flex';
+}
+
+function updateProgress(percentage) {
+    const progressBarFill = document.getElementById('progress-bar-fill');
+    progressBarFill.style.width = `${percentage}%`;
+}
+
+function hideLoadingScreen() {
+    const loadingScreen = document.getElementById('loading-screen');
+    loadingScreen.style.display = 'none';
+}
