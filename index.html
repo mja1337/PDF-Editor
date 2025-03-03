@@ -31,6 +31,7 @@
           <button id="rotate-page-btn" class="btn btn-secondary">Rotate Pages</button>
           <button id="rearrange-pages-btn" class="btn btn-secondary">Rearrange Pages</button>
           <button id="watermark-btn" class="btn btn-secondary">Watermark Pages</button>
+          <button id="compress-btn" class="btn btn-secondary">Compress PDF</button>
         </div>
 
         <div id="page-counter" class="text-center mb-3">Pages: 0</div>
@@ -43,6 +44,17 @@
       </div>
     </div>
   </div>
+
+  <!-- Loading screen -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-content">
+      <span id="loading-message">Loading...</span>
+      <div class="progress-bar">
+        <div id="progress-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+  
 
   <!-- Include Bootstrap JS and dependencies -->
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
