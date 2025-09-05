@@ -213,11 +213,11 @@ saveBtn.addEventListener('click', async () => {
             const pageWidth = newPage.getWidth();
             const pageHeight = newPage.getHeight();
 
-            // This is the same viewport scale you used when rendering
-            const viewport = (await pdfJsDoc.getPage(i + 1)).getViewport({ scale: 1.5 });
+            // Match the viewport used in renderPDF()
+            const page = await pdfJsDoc.getPage(i + 1);
+            const viewport = page.getViewport({ scale: 1.5 });
 
             redactBoxes[i].forEach(box => {
-                // Scale box from canvas space -> PDF space
                 const scaleX = pageWidth / viewport.width;
                 const scaleY = pageHeight / viewport.height;
 
