@@ -22,6 +22,8 @@ let deletedPages = new Set(); // Track deleted pages
 let rotations = {}; // Track rotation of each page
 let pageOrder = []; // New variable to track the current order of pages
 let watermarkText = ''; // Variable to store the watermark text
+let redactMode = false;
+let redactBoxes = {}; // { pageIndex: [ {x, y, width, height} ] }
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
@@ -118,6 +120,56 @@ async function renderPDF() {
         // Update progress on the loading screen
         const progress = Math.round(((i + 1) / pageCount) * 100);
         updateProgress(progress);
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (!redactMode) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const startX = e.clientX - rect.left;
+            const startY = e.clientY - rect.top;
+
+            const box = document.createElement('div');
+            box.className = 'redact-box';
+            box.style.left = `${startX}px`;
+            box.style.top = `${startY}px`;
+            box.style.width = `0px`;
+            box.style.height = `0px`;
+            box.style.position = 'absolute';
+
+            let isDrawing = true;
+
+            canvas.parentElement.appendChild(box);
+
+            function onMouseMove(ev) {
+                if (!isDrawing) return;
+                const currentX = ev.clientX - rect.left;
+                const currentY = ev.clientY - rect.top;
+                box.style.width = `${Math.abs(currentX - startX)}px`;
+                box.style.height = `${Math.abs(currentY - startY)}px`;
+                box.style.left = `${Math.min(currentX, startX)}px`;
+                box.style.top = `${Math.min(currentY, startY)}px`;
+            }
+
+            function onMouseUp() {
+                isDrawing = false;
+                const pageIndex = i;
+                const boxData = {
+                    x: parseFloat(box.style.left),
+                    y: parseFloat(box.style.top),
+                    width: parseFloat(box.style.width),
+                    height: parseFloat(box.style.height),
+                };
+                if (!redactBoxes[pageIndex]) redactBoxes[pageIndex] = [];
+                redactBoxes[pageIndex].push(boxData);
+
+                canvas.removeEventListener('mousemove', onMouseMove);
+                canvas.removeEventListener('mouseup', onMouseUp);
+            }
+
+            canvas.addEventListener('mousemove', onMouseMove);
+            canvas.addEventListener('mouseup', onMouseUp);
+        });
+
     }
 
     // Hide the loading screen once rendering is complete
@@ -135,6 +187,11 @@ function deletePage(pageIndex) {
     updatePageCounter(); // Update the page counter after rendering
 }
 
+document.getElementById('redact-btn').addEventListener('click', () => {
+    redactMode = !redactMode;
+    alert(redactMode ? 'Redact mode enabled. Draw boxes on pages.' : 'Redact mode disabled.');
+});
+
 // Save the modified PDF using PDF-lib with compression
 saveBtn.addEventListener('click', async () => {
     if (!pdfDoc) return;
@@ -151,6 +208,19 @@ saveBtn.addEventListener('click', async () => {
 
         const [newPage] = await newPdfDoc.copyPages(pdfDoc, [i]);
         newPdfDoc.addPage(newPage); // Add the copied page
+
+        if (redactBoxes[i]) {
+            redactBoxes[i].forEach(box => {
+                newPage.drawRectangle({
+                    x: box.x,
+                    y: newPage.getHeight() - box.y - box.height,
+                    width: box.width,
+                    height: box.height,
+                    color: PDFLib.rgb(0, 0, 0),
+                });
+            });
+        }
+
 
         // Apply the rotation if it exists for the page
         if (rotations[i] !== undefined) {
