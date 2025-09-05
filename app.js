@@ -210,17 +210,31 @@ saveBtn.addEventListener('click', async () => {
         newPdfDoc.addPage(newPage); // Add the copied page
 
         if (redactBoxes[i]) {
+            const pageWidth = newPage.getWidth();
+            const pageHeight = newPage.getHeight();
+
+            // This is the same viewport scale you used when rendering
+            const viewport = (await pdfJsDoc.getPage(i + 1)).getViewport({ scale: 1.5 });
+
             redactBoxes[i].forEach(box => {
+                // Scale box from canvas space -> PDF space
+                const scaleX = pageWidth / viewport.width;
+                const scaleY = pageHeight / viewport.height;
+
+                const pdfX = box.x * scaleX;
+                const pdfY = pageHeight - (box.y + box.height) * scaleY;
+                const pdfWidth = box.width * scaleX;
+                const pdfHeight = box.height * scaleY;
+
                 newPage.drawRectangle({
-                    x: box.x,
-                    y: newPage.getHeight() - box.y - box.height,
-                    width: box.width,
-                    height: box.height,
+                    x: pdfX,
+                    y: pdfY,
+                    width: pdfWidth,
+                    height: pdfHeight,
                     color: PDFLib.rgb(0, 0, 0),
                 });
             });
         }
-
 
         // Apply the rotation if it exists for the page
         if (rotations[i] !== undefined) {
