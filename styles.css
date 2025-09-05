@@ -10,3 +10,8 @@
   background-color: black;
   opacity: 1;
 }
+
+.page-container {
+  position: relative; /* ensure boxes position relative to this container */
+  display: inline-block;
+}
