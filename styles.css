@@ -1,73 +1,12 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Editor</title>
-  
-  <!-- Include Bootstrap for styling -->
-  <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-  
-  <!-- Link to the external styles.css -->
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <div class="container">
-    <div class="row">
-      <div class="col-md-12">
-        <h1 class="text-center mb-4">PDF Editor</h1>
+.redact-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
 
-        <!-- File input -->
-        <div class="form-group">
-          <input type="file" id="file-input" class="form-control" accept="application/pdf, image/*" />
-        </div>
-
-        <!-- Functionality buttons -->
-        <div id="function-buttons" class="mb-3">
-          <button id="split-btn" class="btn btn-secondary">Split PDF</button>
-          <button id="merge-pdf-btn" class="btn btn-secondary">Merge PDF</button>
-          <button id="image-to-pdf-btn" class="btn btn-secondary">JPEG to PDF</button>
-          <button id="pdf-to-image-btn" class="btn btn-secondary">PDF to Image</button>
-          <button id="rotate-page-btn" class="btn btn-secondary">Rotate Pages</button>
-          <button id="rearrange-pages-btn" class="btn btn-secondary">Rearrange Pages</button>
-          <button id="watermark-btn" class="btn btn-secondary">Watermark Pages</button>
-          <button id="compress-btn" class="btn btn-secondary">Compress PDF</button>
-        </div>
-
-        <div id="page-counter" class="text-center mb-3">Pages: 0</div>
-
-        <!-- PDF rendering container -->
-        <div id="pdf-container" class="d-flex flex-wrap justify-content-center"></div>
-
-        <!-- Save button -->
-        <button id="save-btn" class="btn btn-primary mt-4" style="display:none;">Save PDF</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Loading screen -->
-  <div id="loading-screen" class="loading-screen">
-    <div class="loading-content">
-      <span id="loading-message">Loading...</span>
-      <div class="progress-bar">
-        <div id="progress-bar-fill"></div>
-      </div>
-    </div>
-  </div>
-  
-
-  <!-- Include Bootstrap JS and dependencies -->
-  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
-  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-
-  <!-- Include PDF.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
-  
-  <!-- Include PDF-lib -->
-  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.js"></script>
-
-  <!-- Your app.js file -->
-  <script type="module" src="app.js"></script>
-</body>
-</html>
+.redact-box {
+  position: absolute;
+  background-color: black;
+  opacity: 1;
+}
