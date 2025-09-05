@@ -162,6 +162,12 @@ async function renderPDF() {
                 if (!redactBoxes[pageIndex]) redactBoxes[pageIndex] = [];
                 redactBoxes[pageIndex].push(boxData);
 
+                // Show Save Redacted button if at least one box exists
+                if (Object.keys(redactBoxes).length > 0) {
+                    document.getElementById('save-redacted-btn').style.display = 'inline-block';
+                    document.getElementById('save-btn').style.display = 'none'; // hide normal save
+                }
+
                 canvas.removeEventListener('mousemove', onMouseMove);
                 canvas.removeEventListener('mouseup', onMouseUp);
             }
@@ -257,6 +263,62 @@ saveBtn.addEventListener('click', async () => {
         console.error('Error saving PDF:', error); // Log any errors encountered during saving
     }
 });
+
+const saveRedactedBtn = document.getElementById('save-redacted-btn');
+
+saveRedactedBtn.addEventListener('click', async () => {
+    if (!pdfJsDoc) return;
+
+    showLoadingScreen('Flattening and saving redacted PDF...');
+
+    const newPdfDoc = await PDFLib.PDFDocument.create();
+    const totalPages = pdfJsDoc.numPages;
+
+    for (let i = 1; i <= totalPages; i++) {
+        if (deletedPages.has(i - 1)) continue;
+
+        const page = await pdfJsDoc.getPage(i);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        // Render original page into canvas
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        // Apply redaction boxes directly onto the canvas
+        if (redactBoxes[i - 1]) {
+            ctx.fillStyle = "black";
+            redactBoxes[i - 1].forEach(box => {
+                ctx.fillRect(box.x, box.y, box.width, box.height);
+            });
+        }
+
+        // Convert canvas to image
+        const imgData = canvas.toDataURL("image/jpeg", 1.0);
+        const imgBytes = await fetch(imgData).then(res => res.arrayBuffer());
+
+        const embeddedImg = await newPdfDoc.embedJpg(imgBytes);
+        const pageWidth = viewport.width;
+        const pageHeight = viewport.height;
+        const newPage = newPdfDoc.addPage([pageWidth, pageHeight]);
+
+        newPage.drawImage(embeddedImg, {
+            x: 0,
+            y: 0,
+            width: pageWidth,
+            height: pageHeight,
+        });
+    }
+
+    const finalPdfBytes = await newPdfDoc.save();
+    downloadPdf(finalPdfBytes, 'redacted_flattened.pdf');
+
+    hideLoadingScreen();
+    alert('Redacted PDF saved successfully (text fully removed).');
+});
+
 
 // Helper function to download the PDF
 function downloadPdf(modifiedPdfBytes, filename) {
