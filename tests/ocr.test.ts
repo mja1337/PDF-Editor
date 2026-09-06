@@ -5,6 +5,11 @@ import {
   platformOcrAvailable,
   tesseractWordBoxesToRuns,
 } from '../src/pdf/ocr'
+import {
+  lstmCoreFileName,
+  tesseractBrowserApi,
+  workerSourceLooksLikeHtml,
+} from '../src/pdf/ocrEngine'
 
 describe('platform OCR', () => {
   it('is unavailable in Node without a TextDetector', () => {
@@ -43,6 +48,32 @@ describe('Tesseract word boxes', () => {
     )
     expect(runs.map((run) => run.text)).toEqual(['Invoice total'])
     expect(runs[0]?.fontSize).toBeCloseTo(8)
+  })
+})
+
+describe('Tesseract browser API', () => {
+  it('reads createWorker from a Vite-style default export', () => {
+    const createWorker = async () => ({})
+    const api = tesseractBrowserApi({
+      default: { createWorker, OEM: { LSTM_ONLY: 1 }, PSM: { SINGLE_BLOCK: '6' } },
+    })
+    expect(api.createWorker).toBe(createWorker)
+    expect(tesseractBrowserApi({ createWorker }).createWorker).toBe(createWorker)
+    expect(
+      tesseractBrowserApi({ default: { default: { createWorker } } }).createWorker,
+    ).toBe(createWorker)
+  })
+
+  it('picks the LSTM core file and rejects HTML served in place of the worker', () => {
+    expect(lstmCoreFileName(false, false)).toBe('tesseract-core-lstm.wasm.js')
+    expect(lstmCoreFileName(true, false)).toBe('tesseract-core-simd-lstm.wasm.js')
+    expect(lstmCoreFileName(true, true)).toBe(
+      'tesseract-core-relaxedsimd-lstm.wasm.js',
+    )
+    expect(workerSourceLooksLikeHtml('<!doctype html><html><body>app</body></html>')).toBe(
+      true,
+    )
+    expect(workerSourceLooksLikeHtml('importScripts("core.js");')).toBe(false)
   })
 })
 

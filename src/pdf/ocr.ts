@@ -144,7 +144,16 @@ async function tesseractCanvas(
   if (signal?.aborted) throw new DOMException('Analysis cancelled.', 'AbortError')
   const enhanced = enhanceForOcr(canvas)
   try {
-    const result = await worker.recognize(enhanced, {}, { text: true, blocks: true })
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      enhanced.toBlob(
+        (file) =>
+          file
+            ? resolve(file)
+            : reject(new Error('The scanned page could not be snapshotted for OCR.')),
+        'image/png',
+      )
+    })
+    const result = await worker.recognize(blob, {}, { text: true, blocks: true })
     return tesseractWordBoxesToRuns(
       wordsFromTesseractBlocks(result.data.blocks),
       canvas.width,
@@ -207,10 +216,11 @@ export async function ocrRenderedPage(
       return await tesseractCanvas(canvas, scale, signal, onStatus)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') throw error
-      throw new Error(
-        'The OCR engine could not be loaded from this GitHub Pages site. Check the connection, then try again.',
-        { cause: error },
-      )
+      if (error instanceof Error && error.message.startsWith('The OCR engine')) throw error
+      const detail = error instanceof Error ? error.message : 'Check the connection, then try again.'
+      throw new Error(`The OCR engine could not be loaded from this GitHub Pages site. ${detail}`, {
+        cause: error,
+      })
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error

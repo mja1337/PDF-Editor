@@ -230,6 +230,7 @@ export default defineConfig({
         ],
         globIgnores: ['**/ocr/**'],
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/\/ocr\//],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: false,
@@ -237,14 +238,15 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: /\/ocr\//,
-            handler: 'CacheFirst',
+            handler: 'NetworkFirst',
             options: {
-              cacheName: 'ocr-engine',
+              cacheName: 'ocr-engine-v2',
+              networkTimeoutSeconds: 20,
               expiration: {
                 maxEntries: 16,
                 maxAgeSeconds: 60 * 60 * 24 * 365,
               },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
         ],
