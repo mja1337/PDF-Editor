@@ -10,6 +10,7 @@ import {
   tesseractBrowserApi,
   workerSourceLooksLikeHtml,
 } from '../src/pdf/ocrEngine'
+import { rewriteTesseractWorkerSource } from '../src/pdf/ocrWorkerSource'
 
 describe('platform OCR', () => {
   it('is unavailable in Node without a TextDetector', () => {
@@ -71,6 +72,14 @@ describe('Tesseract browser API', () => {
       true,
     )
     expect(workerSourceLooksLikeHtml('importScripts("core.js");')).toBe(false)
+  })
+
+  it('rewrites the relaxed-SIMD core request to the working SIMD core', () => {
+    expect(
+      rewriteTesseractWorkerSource(
+        'importScripts("/ocr/tesseract-core-relaxedsimd-lstm.wasm.js")',
+      ),
+    ).toBe('importScripts("/ocr/tesseract-core-simd-lstm.wasm.js")')
   })
 })
 

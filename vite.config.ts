@@ -1,4 +1,4 @@
-import { createReadStream, cpSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, extname, join, relative, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
@@ -7,6 +7,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vitest/config'
 import type { Plugin } from 'vite'
+import { rewriteTesseractWorkerSource } from './src/pdf/ocrWorkerSource.ts'
 
 const repositoryBase = process.env.BASE_PATH ?? '/'
 const require = createRequire(import.meta.url)
@@ -30,10 +31,15 @@ const OCR_CORE_FILES = [
   'tesseract-core-simd-lstm.wasm.js',
   'tesseract-core-simd-lstm.wasm',
 ] as const
+const OCR_CORE_ALIASES = {
+  'tesseract-core-relaxedsimd-lstm.wasm.js': 'tesseract-core-simd-lstm.wasm.js',
+  'tesseract-core-relaxedsimd-lstm.wasm': 'tesseract-core-simd-lstm.wasm',
+} as const
 const TESSDATA_BEST_URL =
   'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/eng.traineddata'
 const OCR_CACHE_DIR = resolve('.ocr-cache')
 const OCR_LANG_GZ = join(OCR_CACHE_DIR, 'eng.traineddata.gz')
+const OCR_WORKER_JS = join(OCR_CACHE_DIR, 'worker.min.js')
 const OCR_MIME: Record<string, string> = {
   '.js': 'text/javascript',
   '.gz': 'application/gzip',
@@ -125,13 +131,24 @@ async function ensureEnglishTessdata() {
   return OCR_LANG_GZ
 }
 
+function ensurePatchedTesseractWorker() {
+  mkdirSync(OCR_CACHE_DIR, { recursive: true })
+  const source = readFileSync(join(TESSERACT_JS_ROOT, 'dist', 'worker.min.js'), 'utf8')
+  writeFileSync(OCR_WORKER_JS, rewriteTesseractWorkerSource(source))
+  return OCR_WORKER_JS
+}
+
 function resolveOcrAsset(rest: string) {
   const name = rest.split('/').filter(Boolean)[0]
   if (!name) return null
-  if (name === 'worker.min.js') return join(TESSERACT_JS_ROOT, 'dist', 'worker.min.js')
+  if (name === 'worker.min.js') return OCR_WORKER_JS
   if (name === 'eng.traineddata.gz') return OCR_LANG_GZ
-  if ((OCR_CORE_FILES as readonly string[]).includes(name)) {
-    return join(TESSERACT_CORE_ROOT, name)
+  const aliased =
+    name in OCR_CORE_ALIASES
+      ? OCR_CORE_ALIASES[name as keyof typeof OCR_CORE_ALIASES]
+      : name
+  if ((OCR_CORE_FILES as readonly string[]).includes(aliased)) {
+    return join(TESSERACT_CORE_ROOT, aliased)
   }
   return null
 }
@@ -160,9 +177,12 @@ function sendOcrAsset(
 function copyOcrAssets(outDir: string) {
   const dest = join(outDir, 'ocr')
   mkdirSync(dest, { recursive: true })
-  cpSync(join(TESSERACT_JS_ROOT, 'dist', 'worker.min.js'), join(dest, 'worker.min.js'))
+  cpSync(ensurePatchedTesseractWorker(), join(dest, 'worker.min.js'))
   for (const file of OCR_CORE_FILES) {
     cpSync(join(TESSERACT_CORE_ROOT, file), join(dest, file))
+  }
+  for (const [alias, target] of Object.entries(OCR_CORE_ALIASES)) {
+    cpSync(join(TESSERACT_CORE_ROOT, target), join(dest, alias))
   }
   cpSync(OCR_LANG_GZ, join(dest, 'eng.traineddata.gz'))
 }
@@ -173,14 +193,17 @@ function ocrAssetsPlugin(): Plugin {
     async buildStart() {
       if (process.env.VITEST) return
       await ensureEnglishTessdata()
+      ensurePatchedTesseractWorker()
     },
     configureServer(server) {
       if (process.env.VITEST) return
-      const ready = ensureEnglishTessdata().catch((error) => {
-        server.config.logger.warn(
-          `[ocr-assets] ${error instanceof Error ? error.message : String(error)}`,
-        )
-      })
+      const ready = ensureEnglishTessdata()
+        .then(() => ensurePatchedTesseractWorker())
+        .catch((error) => {
+          server.config.logger.warn(
+            `[ocr-assets] ${error instanceof Error ? error.message : String(error)}`,
+          )
+        })
       const base = server.config.base
       server.middlewares.use((request: IncomingMessage, response: ServerResponse, next) => {
         if (!ocrPublicPath(request.url ?? '', base)) {
@@ -193,6 +216,7 @@ function ocrAssetsPlugin(): Plugin {
     async writeBundle(options) {
       if (!options.dir) return
       await ensureEnglishTessdata()
+      ensurePatchedTesseractWorker()
       copyOcrAssets(options.dir)
     },
   }
@@ -234,15 +258,15 @@ export default defineConfig({
         navigateFallbackDenylist: [/\/ocr\//],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        skipWaiting: false,
+        skipWaiting: true,
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: /\/ocr\//,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'ocr-engine-v2',
-              networkTimeoutSeconds: 20,
+              cacheName: 'ocr-engine-v3',
+              networkTimeoutSeconds: 60,
               expiration: {
                 maxEntries: 16,
                 maxAgeSeconds: 60 * 60 * 24 * 365,

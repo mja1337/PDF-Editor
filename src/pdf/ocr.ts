@@ -1,5 +1,5 @@
 import type { PDFPageProxy } from 'pdfjs-dist'
-import { ensureTesseractWorker, type OcrMode } from './ocrEngine'
+import { recognizeScannedImage, type OcrMode } from './ocrEngine'
 import { groupTextRuns, type ExtractedTextRun } from './textGeometry'
 
 interface DetectedText {
@@ -140,8 +140,6 @@ async function tesseractCanvas(
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
 ) {
-  const worker = await ensureTesseractWorker(signal, onStatus)
-  if (signal?.aborted) throw new DOMException('Analysis cancelled.', 'AbortError')
   const enhanced = enhanceForOcr(canvas)
   try {
     const blob = await new Promise<Blob>((resolve, reject) => {
@@ -153,7 +151,7 @@ async function tesseractCanvas(
         'image/png',
       )
     })
-    const result = await worker.recognize(blob, {}, { text: true, blocks: true })
+    const result = await recognizeScannedImage(blob, signal, onStatus)
     return tesseractWordBoxesToRuns(
       wordsFromTesseractBlocks(result.data.blocks),
       canvas.width,

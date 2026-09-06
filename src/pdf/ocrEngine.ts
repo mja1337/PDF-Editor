@@ -190,6 +190,63 @@ async function createSameOriginWorker(
   throw lastError instanceof Error ? lastError : ocrFailure(lastError)
 }
 
+function nativeTesseractWorker(worker: Worker) {
+  return (worker as Worker & { worker?: globalThis.Worker }).worker
+}
+
+function dropTesseractWorker() {
+  const pending = workerPromise
+  workerPromise = null
+  if (pending) {
+    void pending.then((worker) => worker.terminate()).catch(() => undefined)
+  }
+}
+
+export async function recognizeScannedImage(
+  image: Blob,
+  signal?: AbortSignal,
+  onStatus?: (status: string) => void,
+) {
+  const worker = await ensureTesseractWorker(signal, onStatus)
+  const native = nativeTesseractWorker(worker)
+  return await new Promise<Awaited<ReturnType<Worker['recognize']>>>((resolve, reject) => {
+    let settled = false
+    const fail = (cause: unknown) => {
+      if (settled) return
+      settled = true
+      native?.removeEventListener('error', onError)
+      signal?.removeEventListener('abort', onAbort)
+      window.clearTimeout(timer)
+      dropTesseractWorker()
+      if (cause instanceof DOMException && cause.name === 'AbortError') {
+        reject(cause)
+        return
+      }
+      reject(ocrFailure(cause))
+    }
+    const onError = (event: ErrorEvent) => {
+      fail(event.message || 'The OCR worker crashed.')
+    }
+    const onAbort = () => fail(new DOMException('Analysis cancelled.', 'AbortError'))
+    const timer = window.setTimeout(() => {
+      fail('Timed out while reading the scanned page.')
+    }, 180_000)
+    native?.addEventListener('error', onError)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    void worker.recognize(image, {}, { text: true, blocks: true }).then(
+      (result) => {
+        if (settled) return
+        settled = true
+        native?.removeEventListener('error', onError)
+        signal?.removeEventListener('abort', onAbort)
+        window.clearTimeout(timer)
+        resolve(result)
+      },
+      (error) => fail(error),
+    )
+  })
+}
+
 export async function ensureTesseractWorker(
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
