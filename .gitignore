@@ -6,3 +6,4 @@ test-results/
 *.local
 .DS_Store
 .ocr-cache/
+tests/ocr-bench/last-report.json
