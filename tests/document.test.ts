@@ -128,6 +128,21 @@ describe('documentReducer', () => {
     expect(documentReducer(watermarked, { type: 'undo' }).present?.watermark).toBeNull()
   })
 
+  it('applies a saved page logo stamp and can undo it', () => {
+    const loaded = loadedDocument()
+    const stamped = documentReducer(loaded, {
+      type: 'setStamp',
+      stamp: {
+        imageData: 'data:image/png;base64,aaaa',
+        corner: 'top-right',
+        size: 0.16,
+        opacity: 1,
+      },
+    })
+    expect(stamped.present?.stamp?.corner).toBe('top-right')
+    expect(documentReducer(stamped, { type: 'undo' }).present?.stamp).toBeNull()
+  })
+
   it('moves a non-contiguous selection together without changing its order', () => {
     const loaded = loadedDocument()
     const moved = documentReducer(loaded, {

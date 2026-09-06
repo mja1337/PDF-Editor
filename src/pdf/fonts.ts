@@ -2,6 +2,8 @@ import sans400 from '@fontsource/noto-sans/files/noto-sans-latin-400-normal.woff
 import sans400Italic from '@fontsource/noto-sans/files/noto-sans-latin-400-italic.woff?url'
 import sans700 from '@fontsource/noto-sans/files/noto-sans-latin-700-normal.woff?url'
 import sans700Italic from '@fontsource/noto-sans/files/noto-sans-latin-700-italic.woff?url'
+import sans900 from '@fontsource/noto-sans/files/noto-sans-latin-900-normal.woff?url'
+import sans900Italic from '@fontsource/noto-sans/files/noto-sans-latin-900-italic.woff?url'
 import serif400 from '@fontsource/noto-serif/files/noto-serif-latin-400-normal.woff?url'
 import serif400Italic from '@fontsource/noto-serif/files/noto-serif-latin-400-italic.woff?url'
 import serif700 from '@fontsource/noto-serif/files/noto-serif-latin-700-normal.woff?url'
@@ -13,13 +15,16 @@ import type { PageOverlay } from '../domain/document'
 import type { EditorFontRole } from './fontMatch'
 
 type FaceStyle = 'normal' | 'italic'
-type FaceKey = `${EditorFontRole}-${400 | 700}-${FaceStyle}`
+type FaceWeight = 400 | 700 | 900
+type FaceKey = `${EditorFontRole}-${FaceWeight}-${FaceStyle}`
 
-const FACE_URLS: Record<FaceKey, string> = {
+const FACE_URLS: Partial<Record<FaceKey, string>> = {
   'sans-400-normal': sans400,
   'sans-400-italic': sans400Italic,
   'sans-700-normal': sans700,
   'sans-700-italic': sans700Italic,
+  'sans-900-normal': sans900,
+  'sans-900-italic': sans900Italic,
   'serif-400-normal': serif400,
   'serif-400-italic': serif400Italic,
   'serif-700-normal': serif700,
@@ -34,8 +39,10 @@ const faceBytes = new Map<string, Promise<ArrayBuffer>>()
 
 export function overlayFontKey(overlay: PageOverlay): FaceKey {
   const role = overlay.fontRole ?? 'sans'
-  const weight = overlay.fontWeight ?? (overlay.extracted ? 400 : 700)
+  const requested = overlay.fontWeight ?? (overlay.extracted ? 400 : 900)
   const style: FaceStyle = overlay.fontItalic ? 'italic' : 'normal'
+  const weight: FaceWeight =
+    requested >= 900 ? (role === 'sans' ? 900 : 700) : requested >= 700 ? 700 : 400
   return `${role}-${weight}-${style}`
 }
 
@@ -78,7 +85,7 @@ export async function createOverlayFontLibrary(
   const embed = async (key: FaceKey) => {
     const existing = embedded.get(key)
     if (existing) return existing
-    const font = await document.embedFont(await loadFace(FACE_URLS[key]), { subset: true })
+    const font = await document.embedFont(await loadFace(FACE_URLS[key] ?? FACE_URLS['sans-700-normal']!), { subset: true })
     embedded.set(key, font)
     return font
   }

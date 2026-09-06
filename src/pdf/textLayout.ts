@@ -17,9 +17,9 @@ export function overlayFontCss(
   >,
   renderScale: number,
 ) {
-  const weight = overlay.fontWeight ?? (overlay.extracted ? 400 : 700)
+  const weight = overlay.fontWeight ?? (overlay.extracted ? 400 : 900)
   const italic = overlay.fontItalic ? 'italic' : 'normal'
-  return `${italic} ${weight} ${overlayFontPx(overlay, renderScale)}px ${cssFontFamily(overlay.fontRole ?? 'sans')}`
+  return `${italic} ${weight} ${overlayFontPx(overlay, renderScale)}px ${cssFontFamily(overlay.fontRole ?? 'sans', weight)}`
 }
 
 export function overlayPadPx(

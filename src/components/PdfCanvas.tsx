@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import type {
+  LogoStampConfig,
   PageOverlay,
   QuarterTurn,
   WatermarkConfig,
@@ -17,6 +18,7 @@ interface PdfCanvasProps {
   className?: string
   label: string
   watermark?: WatermarkConfig | null
+  stamp?: LogoStampConfig | null
   overlays?: PageOverlay[]
   interactiveAnnotations?: boolean
   annotationTool?: AnnotationTool
@@ -46,6 +48,7 @@ export function PdfCanvas({
   className,
   label,
   watermark,
+  stamp,
   overlays = [],
   interactiveAnnotations,
   annotationTool,
@@ -157,6 +160,15 @@ export function PdfCanvas({
         </p>
       )}
       <canvas ref={canvasRef} aria-label={label} role="img" />
+      {stamp && display.width > 0 && (
+        <img
+          className={`page-stamp page-stamp-${stamp.corner}`}
+          src={stamp.imageData}
+          alt=""
+          draggable={false}
+          style={{ width: `${stamp.size * 100}%`, opacity: stamp.opacity }}
+        />
+      )}
       {display.width > 0 && display.height > 0 && (
         <AnnotationLayer
           width={display.width}

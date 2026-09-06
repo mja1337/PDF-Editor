@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import type { PageRef, WatermarkConfig } from '../domain/document'
+import type { PageRef, LogoStampConfig, WatermarkConfig } from '../domain/document'
 import { PdfCanvas } from './PdfCanvas'
 
 interface LazyThumbnailProps {
@@ -15,6 +15,7 @@ interface LazyThumbnailProps {
   onDragStart: () => void
   onDragEnd: () => void
   watermark?: WatermarkConfig | null
+  stamp?: LogoStampConfig | null
 }
 
 export function LazyThumbnail({
@@ -29,6 +30,7 @@ export function LazyThumbnail({
   onDragStart,
   onDragEnd,
   watermark,
+  stamp,
 }: LazyThumbnailProps) {
   const itemRef = useRef<HTMLLIElement>(null)
   const [visible, setVisible] = useState(position < 4)
@@ -86,6 +88,7 @@ export function LazyThumbnail({
               targetWidth={164}
               label={`Preview of page ${position + 1}`}
               watermark={watermark}
+              stamp={stamp}
           overlays={page.overlays.filter(
             (overlay) => !overlay.extracted || overlay.edited,
           )}

@@ -30,7 +30,10 @@ export function classifyPdfFont(fontName?: string, cssFamily?: string): EditorFo
   return { role, weight: bold ? 700 : 400, italic }
 }
 
-export function cssFontFamily(role: EditorFontRole): string {
+export function cssFontFamily(role: EditorFontRole, weight: number = 400): string {
+  if (role === 'sans' && weight >= 900) {
+    return '"Arial Black", "Arial Heavy", Impact, Arial, "Noto Sans", sans-serif'
+  }
   switch (role) {
     case 'serif':
       return '"Times New Roman", Times, "Noto Serif", serif'

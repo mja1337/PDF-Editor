@@ -197,6 +197,17 @@ test('renders page text and analyses it into editable lines', async ({ page }) =
   await expect(page.getByRole('button', { name: /Edited · A much longer replacement/i })).toBeVisible()
   const afterGrow = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
   expect(afterGrow?.width ?? 0).toBeGreaterThan((beforeGrow?.width ?? 0) + 8)
+
+  const lineBox = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click()
+  await page.mouse.click(
+    (lineBox?.x ?? 0) + (lineBox?.width ?? 0) / 2,
+    (lineBox?.y ?? 0) + (lineBox?.height ?? 0) / 2,
+  )
+  const highlight = page.getByRole('button', { name: 'highlight annotation' })
+  await expect(highlight).toBeVisible()
+  const highlightBox = await highlight.boundingBox()
+  expect(Math.abs((highlightBox?.width ?? 0) - (lineBox?.width ?? 0))).toBeLessThan(28)
 })
 
 test('covers analysed text with the sampled page colour', async ({ page }) => {
@@ -273,6 +284,8 @@ test('creates, edits, moves, resizes, and exports annotations', async ({ page })
   await pageEditor.press('Enter')
   const textAnnotation = page.getByRole('button', { name: 'text annotation' })
   await expect(textAnnotation).toBeVisible()
+  await expect(textAnnotation).toHaveCSS('font-weight', /900|800|bold/)
+  await expect(textAnnotation).not.toHaveCSS('color', 'rgb(224, 82, 82)')
 
   const beforeMove = await textAnnotation.boundingBox()
   expect(beforeMove).toBeTruthy()

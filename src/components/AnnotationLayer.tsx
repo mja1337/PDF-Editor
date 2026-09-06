@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { OverlayType, PageOverlay } from '../domain/document'
 import { normalizeOverlay } from '../domain/document'
-import { createDefaultOverlay, createInkOverlay } from '../domain/overlays'
+import {
+  createDefaultOverlay,
+  createInkOverlay,
+  createLineMark,
+  hitExtractedLine,
+  matchingLineMark,
+} from '../domain/overlays'
 import { cssFontFamily } from '../pdf/fontMatch'
 import { sampleOverlayPixels, type SampledAppearance } from '../pdf/pageSample'
 import {
@@ -12,8 +18,9 @@ import {
   overlayFontPx,
   overlayPadPx,
 } from '../pdf/textLayout'
+import { archOffset } from '../pdf/wordArt'
 
-export type AnnotationTool = 'select' | 'eraser' | OverlayType
+export type AnnotationTool = 'select' | 'eraser' | 'wordArt' | OverlayType
 
 interface AnnotationLayerProps {
   width: number
@@ -63,7 +70,7 @@ function overlayStyle(
   const covering = Boolean(
     overlay.extracted && (overlay.edited || overlay.cover || editing),
   )
-  const weight = overlay.fontWeight ?? (overlay.extracted ? 400 : 700)
+  const weight = overlay.fontWeight ?? (overlay.extracted ? 400 : 900)
   const color = appearance?.color ?? overlay.color
   const background = appearance?.backgroundColor ?? overlay.backgroundColor ?? '#ffffff'
   const pad = overlayPadPx(overlay, renderScale)
@@ -78,7 +85,7 @@ function overlayStyle(
     borderColor: color,
     borderWidth: `${Math.max(0.25, overlay.strokeWidth * renderScale)}px`,
     fontSize: `${overlayFontPx(overlay, renderScale)}px`,
-    fontFamily: cssFontFamily(overlay.fontRole ?? 'sans'),
+    fontFamily: cssFontFamily(overlay.fontRole ?? 'sans', weight),
     fontWeight: weight,
     fontStyle: overlay.fontItalic ? 'italic' : 'normal',
     lineHeight: overlay.extracted ? 1 : 1.15,
@@ -106,7 +113,82 @@ function commitText(overlay: PageOverlay, value: string) {
   return value.trim() || 'Add text'
 }
 
+function SketchPath({ overlay, renderScale }: { overlay: PageOverlay; renderScale: number }) {
+  const points = overlay.points ?? []
+  if (points.length < 2) return null
+  const joined = points.map((point) => `${point.x},${point.y}`).join(' ')
+  const closed =
+    overlay.type === 'rectangle' || overlay.type === 'ellipse' || overlay.type === 'diamond'
+  return (
+    <svg className="annotation-line annotation-sketch" viewBox="0 0 1 1" preserveAspectRatio="none">
+      {closed ? (
+        <polygon
+          points={joined}
+          fill="none"
+          stroke={overlay.color}
+          strokeWidth={overlay.strokeWidth * renderScale}
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : (
+        <polyline
+          points={joined}
+          fill="none"
+          stroke={overlay.color}
+          strokeWidth={overlay.strokeWidth * renderScale}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+    </svg>
+  )
+}
+
+function WordArtLabel({ overlay }: { overlay: PageOverlay }) {
+  const text = overlay.extracted && !overlay.edited ? '' : overlay.text || 'Add text'
+  const style = overlay.wordArt ?? 'plain'
+  if (!text) {
+    return <span className="annotation-text" />
+  }
+  if (style === 'arch') {
+    const letters = [...text]
+    return (
+      <span className="annotation-text wordart wordart-arch">
+        {letters.map((letter, index) => {
+          const offset = archOffset(index, letters.length)
+          return (
+            <span
+              key={`${index}-${letter}`}
+              style={{
+                display: 'inline-block',
+                transform: `translateY(${offset.y}em) rotate(${offset.rotate}deg)`,
+              }}
+            >
+              {letter === ' ' ? '\u00a0' : letter}
+            </span>
+          )
+        })}
+      </span>
+    )
+  }
+  if (style === 'stack') {
+    return (
+      <span className="annotation-text wordart wordart-stack">
+        <span className="wordart-stack-back" aria-hidden="true">
+          {text}
+        </span>
+        <span>{text}</span>
+      </span>
+    )
+  }
+  return <span className={`annotation-text wordart wordart-${style}`}>{text}</span>
+}
+
 function OverlayContent({ overlay, renderScale }: { overlay: PageOverlay; renderScale: number }) {
+  if (overlay.sketch && overlay.points && overlay.points.length > 1) {
+    return <SketchPath overlay={overlay} renderScale={renderScale} />
+  }
   switch (overlay.type) {
     case 'image':
       return <img className="annotation-image" src={overlay.imageData} alt="" draggable={false} />
@@ -119,14 +201,7 @@ function OverlayContent({ overlay, renderScale }: { overlay: PageOverlay; render
         </svg>
       )
     case 'text':
-      return (
-        <span
-          className="annotation-text"
-          style={overlay.extracted ? { opacity: overlay.opacity } : undefined}
-        >
-          {overlay.extracted && !overlay.edited ? '' : overlay.text || 'Add text'}
-        </span>
-      )
+      return <WordArtLabel overlay={overlay} />
     case 'highlight':
       return <span className="annotation-highlight" style={{ background: overlay.color }} />
     case 'underline':
@@ -145,6 +220,36 @@ function OverlayContent({ overlay, renderScale }: { overlay: PageOverlay; render
             y1="0"
             x2="100"
             y2="100"
+            stroke={overlay.color}
+            strokeWidth={overlay.strokeWidth}
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      )
+    case 'arrow':
+      return (
+        <svg className="annotation-line" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <line
+            x1="8"
+            y1="82"
+            x2="78"
+            y2="22"
+            stroke={overlay.color}
+            strokeWidth={overlay.strokeWidth}
+            vectorEffect="non-scaling-stroke"
+          />
+          <polygon
+            points="92,12 68,28 84,36"
+            fill={overlay.color}
+          />
+        </svg>
+      )
+    case 'diamond':
+      return (
+        <svg className="annotation-line" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <polygon
+            points="50,4 96,50 50,96 4,50"
+            fill="none"
             stroke={overlay.color}
             strokeWidth={overlay.strokeWidth}
             vectorEffect="non-scaling-stroke"
@@ -455,15 +560,34 @@ export function AnnotationLayer({
           setEditSession(null)
           return
         }
+        const point = pointerPoint(event)
+        if (tool === 'highlight' || tool === 'underline' || tool === 'strikeout') {
+          const line = hitExtractedLine(overlays, point.x, point.y)
+          if (line) {
+            const existing = matchingLineMark(overlays, tool, line)
+            if (existing) onSelect?.(existing.id)
+            else onCreate?.(createLineMark(tool, line, color))
+            return
+          }
+        }
         const bounds = event.currentTarget.getBoundingClientRect()
-        const created = createDefaultOverlay(
-          tool,
-          (event.clientX - bounds.left) / bounds.width,
-          (event.clientY - bounds.top) / bounds.height,
-          color,
-        )
+        const created =
+          tool === 'wordArt'
+            ? createDefaultOverlay(
+                'text',
+                (event.clientX - bounds.left) / bounds.width,
+                (event.clientY - bounds.top) / bounds.height,
+                color,
+                { wordArt: 'outline' },
+              )
+            : createDefaultOverlay(
+                tool,
+                (event.clientX - bounds.left) / bounds.width,
+                (event.clientY - bounds.top) / bounds.height,
+                color,
+              )
         onCreate?.(created)
-        if (tool === 'text') {
+        if (tool === 'text' || tool === 'wordArt') {
           setEditSession({
             id: created.id,
             caret: null,
@@ -541,7 +665,7 @@ export function AnnotationLayer({
               const rect = event.currentTarget.getBoundingClientRect()
               const pad = overlayPadPx(overlay, renderScale)
               gestureRef.current = {
-                mode: overlay.type === 'text' ? 'maybe-move' : 'move',
+                mode: overlay.type === 'text' && overlay.extracted ? 'maybe-move' : 'move',
                 overlay,
                 startX: event.clientX,
                 startY: event.clientY,

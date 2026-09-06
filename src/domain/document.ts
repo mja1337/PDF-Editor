@@ -8,8 +8,21 @@ export type OverlayType =
   | 'rectangle'
   | 'ellipse'
   | 'line'
+  | 'arrow'
+  | 'diamond'
   | 'ink'
   | 'image'
+
+export type WordArtStyle = 'plain' | 'outline' | 'shadow' | 'arch' | 'stack'
+
+export type StampCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+export interface LogoStampConfig {
+  imageData: string
+  corner: StampCorner
+  size: number
+  opacity: number
+}
 
 export interface PageOverlay {
   id: string
@@ -24,8 +37,11 @@ export interface PageOverlay {
   text?: string
   fontSize?: number
   fontRole?: 'sans' | 'serif' | 'mono'
-  fontWeight?: 400 | 700
+  fontWeight?: 400 | 700 | 900
   fontItalic?: boolean
+  wordArt?: WordArtStyle
+  sketch?: boolean
+  sketchSeed?: number
   points?: Array<{ x: number; y: number }>
   imageData?: string
   signature?: boolean
@@ -63,6 +79,7 @@ export interface EditorDocument {
   sources: SourceDocument[]
   pages: PageRef[]
   watermark: WatermarkConfig | null
+  stamp: LogoStampConfig | null
 }
 
 export interface DocumentHistory {
@@ -84,6 +101,7 @@ export type DocumentAction =
     }
   | { type: 'append'; sources: SourceDocument[]; pages: PageRef[] }
   | { type: 'setWatermark'; watermark: WatermarkConfig | null }
+  | { type: 'setStamp'; stamp: LogoStampConfig | null }
   | { type: 'addOverlay'; pageId: string; overlay: PageOverlay }
   | {
       type: 'updateOverlay'
@@ -282,6 +300,19 @@ export function documentReducer(
         return { ...document, watermark: action.watermark }
       })
 
+    case 'setStamp':
+      return commit(history, (document) => {
+        if (
+          document.stamp?.imageData === action.stamp?.imageData &&
+          document.stamp?.corner === action.stamp?.corner &&
+          document.stamp?.size === action.stamp?.size &&
+          document.stamp?.opacity === action.stamp?.opacity
+        ) {
+          return document
+        }
+        return { ...document, stamp: action.stamp }
+      })
+
     case 'addOverlay':
       return commit(history, (document) => ({
         ...document,
@@ -459,6 +490,7 @@ export function createEditorDocument(
     sources: [source],
     pages: createPagesForSource(source),
     watermark: null,
+    stamp: null,
   }
 }
 
@@ -516,5 +548,6 @@ export function createEditorDocumentFromSources(
     sources,
     pages: sources.flatMap(createPagesForSource),
     watermark: null,
+    stamp: null,
   }
 }

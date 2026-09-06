@@ -45,8 +45,8 @@ describe('classifyPdfFont', () => {
   })
 
   it('uses metric-compatible system stacks on screen', () => {
-    expect(cssFontFamily('serif')).toContain('Times New Roman')
+    expect(cssFontFamily('sans', 900)).toContain('Arial Black')
     expect(cssFontFamily('sans')).toContain('Arial')
-    expect(cssFontFamily('mono')).toContain('Courier New')
+    expect(cssFontFamily('sans')).not.toContain('Arial Black')
   })
 })

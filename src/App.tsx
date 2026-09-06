@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ArrowUpRight,
   BookOpen,
   BringToFront,
   CheckCircle2,
@@ -12,6 +13,7 @@ import {
   Circle,
   ClipboardPaste,
   Copy,
+  Diamond,
   Download,
   FilePlus2,
   FileText,
@@ -31,12 +33,14 @@ import {
   Redo2,
   RotateCcw,
   RotateCw,
+  Settings,
   ShieldCheck,
   ScanSearch,
   Scissors,
   Search,
   SendToBack,
   Slash,
+  Sparkles,
   Square,
   Strikethrough,
   Trash2,
@@ -57,6 +61,7 @@ import {
   useState,
 } from 'react'
 import { LazyThumbnail } from './components/LazyThumbnail'
+import { SettingsDialog } from './components/SettingsDialog'
 import { SignatureDialog } from './components/SignatureDialog'
 import type { AnnotationTool } from './components/AnnotationLayer'
 import {
@@ -72,8 +77,10 @@ import {
   documentReducer,
   initialHistory,
 } from './domain/document'
-import type { OverlayType, PageOverlay } from './domain/document'
-import { createDefaultOverlay } from './domain/overlays'
+import type { OverlayType, PageOverlay, WordArtStyle } from './domain/document'
+import { createDefaultOverlay, withSketchStyle } from './domain/overlays'
+import { loadPreferences } from './domain/preferences'
+import { WORD_ART_STYLES } from './pdf/wordArt'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
 import type { OutlineEntry, SearchResult } from './pdf/navigation'
@@ -237,6 +244,7 @@ export function App() {
   const [overlayClipboard, setOverlayClipboard] = useState<PageOverlay | null>(null)
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null)
   const [signatureOpen, setSignatureOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [inkWidth, setInkWidth] = useState(2)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const addPdfInputRef = useRef<HTMLInputElement>(null)
@@ -354,6 +362,7 @@ export function App() {
       if (replace) {
         await destroySessions(sessionsRef.current)
         const nextDocument = createEditorDocumentFromSources(sources)
+        nextDocument.stamp = loadPreferences().stamp
         dispatch({ type: 'load', document: nextDocument })
         const firstPageId = nextDocument.pages[0]?.id ?? null
         setSelectedPageId(firstPageId)
@@ -438,6 +447,7 @@ export function App() {
       if (replace) {
         await destroySessions(sessionsRef.current)
         const nextDocument = createEditorDocumentFromSources(sources, 'images.pdf')
+        nextDocument.stamp = loadPreferences().stamp
         dispatch({ type: 'load', document: nextDocument })
         const firstPageId = nextDocument.pages[0]?.id ?? null
         setSelectedPageId(firstPageId)
@@ -768,13 +778,14 @@ export function App() {
   const closeContextMenu = useCallback(() => setContextTarget(null), [])
 
   const placeContextOverlay = useCallback(
-    (type: OverlayType) => {
+    (type: OverlayType, options?: { wordArt?: WordArtStyle }) => {
       if (contextTarget?.kind !== 'canvas') return
       const overlay = createDefaultOverlay(
         type,
         contextTarget.point.x,
         contextTarget.point.y,
         annotationColor,
+        options,
       )
       dispatch({ type: 'addOverlay', pageId: contextTarget.pageId, overlay })
       setSelectedOverlayId(overlay.id)
@@ -893,6 +904,12 @@ export function App() {
           onSelect: () => placeContextOverlay('text'),
         },
         {
+          id: 'add-word-art',
+          label: 'Add word art here',
+          icon: <Sparkles size={16} />,
+          onSelect: () => placeContextOverlay('text', { wordArt: 'outline' }),
+        },
+        {
           id: 'add-highlight',
           label: 'Add highlight here',
           icon: <Highlighter size={16} />,
@@ -905,6 +922,12 @@ export function App() {
           onSelect: () => placeContextOverlay('rectangle'),
         },
         {
+          id: 'add-diamond',
+          label: 'Add diamond here',
+          icon: <Diamond size={16} />,
+          onSelect: () => placeContextOverlay('diamond'),
+        },
+        {
           id: 'add-ellipse',
           label: 'Add ellipse here',
           icon: <Circle size={16} />,
@@ -915,6 +938,12 @@ export function App() {
           label: 'Add line here',
           icon: <Slash size={16} />,
           onSelect: () => placeContextOverlay('line'),
+        },
+        {
+          id: 'add-arrow',
+          label: 'Add arrow here',
+          icon: <ArrowUpRight size={16} />,
+          onSelect: () => placeContextOverlay('arrow'),
         },
         {
           id: 'paste-annotation',
@@ -1303,6 +1332,9 @@ export function App() {
             {online ? <Wifi size={14} /> : <WifiOff size={14} />}
             {online ? 'Online' : 'Offline'}
           </span>
+          <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
+            <Settings size={18} />
+          </IconButton>
           <button
             type="button"
             className="export-button"
@@ -1495,6 +1527,7 @@ export function App() {
                         setDraggedPageId(null)
                       }}
                       watermark={editorDocument.watermark}
+                      stamp={editorDocument.stamp}
                     />
                   )
                 })}
@@ -1678,6 +1711,7 @@ export function App() {
                     }
                     label={`Page ${selectedIndex + 1} of ${editorDocument.pages.length}`}
                     watermark={editorDocument.watermark}
+                    stamp={editorDocument.stamp}
                     overlays={selectedPage.overlays}
                     interactiveAnnotations
                     annotationTool={annotationTool}
@@ -1810,6 +1844,14 @@ export function App() {
                 </button>
                 <button
                   type="button"
+                  className={annotationTool === 'wordArt' ? 'is-active' : ''}
+                  aria-pressed={annotationTool === 'wordArt'}
+                  onClick={() => setAnnotationTool('wordArt')}
+                >
+                  <Sparkles size={16} /> Word Art
+                </button>
+                <button
+                  type="button"
                   className={annotationTool === 'highlight' ? 'is-active' : ''}
                   aria-pressed={annotationTool === 'highlight'}
                   onClick={() => setAnnotationTool('highlight')}
@@ -1856,6 +1898,22 @@ export function App() {
                 >
                   <Slash size={16} /> Line
                 </button>
+                <button
+                  type="button"
+                  className={annotationTool === 'arrow' ? 'is-active' : ''}
+                  aria-pressed={annotationTool === 'arrow'}
+                  onClick={() => setAnnotationTool('arrow')}
+                >
+                  <ArrowUpRight size={16} /> Arrow
+                </button>
+                <button
+                  type="button"
+                  className={annotationTool === 'diamond' ? 'is-active' : ''}
+                  aria-pressed={annotationTool === 'diamond'}
+                  onClick={() => setAnnotationTool('diamond')}
+                >
+                  <Diamond size={16} /> Diamond
+                </button>
               </div>
               {annotationTool === 'ink' && <div className="ink-controls">
                 <label>Ink colour <input type="color" value={annotationColor} onChange={(event) => setAnnotationColor(event.target.value)} /></label>
@@ -1864,7 +1922,29 @@ export function App() {
                 </select></label>
               </div>}
               {annotationTool !== 'select' && (
-                <p className="tool-hint">{annotationTool === 'ink' ? 'Drag to draw. Each stroke can be undone separately.' : annotationTool === 'eraser' ? 'Click a drawn stroke to remove it. Undo restores it.' : 'Click the page to place the annotation.'}</p>
+                <p className="tool-hint">
+                  {annotationTool === 'ink'
+                    ? 'Drag to draw. Each stroke can be undone separately.'
+                    : annotationTool === 'eraser'
+                      ? 'Click a drawn stroke to remove it. Undo restores it.'
+                      : annotationTool === 'highlight' ||
+                          annotationTool === 'underline' ||
+                          annotationTool === 'strikeout'
+                        ? selectedPage?.overlays.some((overlay) => overlay.extracted)
+                          ? 'Click an analysed line to mark that text. Empty space still places a free box.'
+                          : 'Click the page to place a box, or analyse text first to mark whole lines.'
+                        : annotationTool === 'wordArt'
+                          ? 'Click to place stylised Arial Black text. Drag to move; double-click to edit.'
+                          : annotationTool === 'text'
+                            ? 'Click to place Arial Black text. Drag to move it; double-click to edit.'
+                            : annotationTool === 'rectangle' ||
+                                annotationTool === 'ellipse' ||
+                                annotationTool === 'line' ||
+                                annotationTool === 'arrow' ||
+                                annotationTool === 'diamond'
+                              ? 'Click to place a sketchy shape, Excalidraw-style. Select it to switch to a clean stroke.'
+                              : 'Click the page to place the annotation.'}
+                </p>
               )}
             </section>
 
@@ -1881,6 +1961,27 @@ export function App() {
                       }
                     />
                   </label>
+                )}
+                {selectedOverlay.type === 'text' && !selectedOverlay.extracted && (
+                  <div className="property-row">
+                    <span>Word art</span>
+                    <div className="property-options">
+                      {WORD_ART_STYLES.map((style) => (
+                        <button
+                          key={style.id}
+                          type="button"
+                          className={
+                            (selectedOverlay.wordArt ?? 'plain') === style.id ? 'is-active' : ''
+                          }
+                          onClick={() =>
+                            updateSelectedOverlay(selectedOverlay.id, { wordArt: style.id })
+                          }
+                        >
+                          {style.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
                 {selectedOverlay.extracted && (
                   <p className="tool-hint">
@@ -1935,6 +2036,36 @@ export function App() {
                           {strokeWidth}px
                         </button>
                       ))}
+                    </div>
+                  </div>
+                )}
+                {['rectangle', 'ellipse', 'line', 'arrow', 'diamond'].includes(
+                  selectedOverlay.type,
+                ) && (
+                  <div className="property-row">
+                    <span>Stroke</span>
+                    <div className="property-options">
+                      <button
+                        type="button"
+                        className={selectedOverlay.sketch !== false ? 'is-active' : ''}
+                        onClick={() =>
+                          updateSelectedOverlay(
+                            selectedOverlay.id,
+                            withSketchStyle(selectedOverlay, true),
+                          )
+                        }
+                      >
+                        Sketchy
+                      </button>
+                      <button
+                        type="button"
+                        className={selectedOverlay.sketch === false ? 'is-active' : ''}
+                        onClick={() =>
+                          updateSelectedOverlay(selectedOverlay.id, { sketch: false })
+                        }
+                      >
+                        Clean
+                      </button>
                     </div>
                   </div>
                 )}
@@ -2145,6 +2276,15 @@ export function App() {
       </div>
 
       <ServiceWorkerStatus />
+      {settingsOpen && (
+        <SettingsDialog
+          stamp={editorDocument?.stamp ?? loadPreferences().stamp}
+          onClose={() => setSettingsOpen(false)}
+          onSaveStamp={(stamp) => {
+            if (editorDocument) dispatch({ type: 'setStamp', stamp })
+          }}
+        />
+      )}
       {signatureOpen && selectedPage && <SignatureDialog
         onClose={() => setSignatureOpen(false)}
         onInsert={(overlay) => {

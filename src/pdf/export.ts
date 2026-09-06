@@ -11,7 +11,9 @@ import {
   overlayLineToPdf,
   overlayToPdfRect,
 } from './coordinates'
+import { stampDisplayRect } from './stamp'
 import { overlayPadPx, wrapTextToWidth } from './textLayout'
+import { archOffset } from './wordArt'
 
 function copyMetadata(source: PdfLibDocument, output: PdfLibDocument) {
   const title = source.getTitle()
@@ -100,6 +102,36 @@ export async function exportPdf(
         rotate: degrees(document.watermark.rotation),
       })
     }
+    if (document.stamp?.imageData) {
+      let stampImage = images.get(document.stamp.imageData)
+      if (!stampImage) {
+        stampImage = await output.embedPng(document.stamp.imageData)
+        images.set(document.stamp.imageData, stampImage)
+      }
+      const pageWidth = page.getWidth()
+      const pageHeight = page.getHeight()
+      const quarterTurn = rotation as QuarterTurn
+      const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+      const box = stampDisplayRect(
+        document.stamp,
+        display.width,
+        display.height,
+        stampImage.width / Math.max(1, stampImage.height),
+      )
+      const anchor = displayPointToPdf(
+        { x: box.x, y: box.y + box.height },
+        pageWidth,
+        pageHeight,
+        quarterTurn,
+      )
+      page.drawImage(stampImage, {
+        ...anchor,
+        width: box.width,
+        height: box.height,
+        rotate: degrees(rotation),
+        opacity: document.stamp.opacity,
+      })
+    }
 
 
     for (const overlay of pageReference.overlays) {
@@ -130,7 +162,10 @@ export async function exportPdf(
           y: (overlay.y + overlay.height) * display.height }, pageWidth, pageHeight, quarterTurn)
         page.drawImage(image, { ...anchor, width: overlay.width * display.width,
           height: overlay.height * display.height, rotate: degrees(rotation), opacity: overlay.opacity })
-      } else if (overlay.type === 'ink') {
+      } else if (
+        (overlay.type === 'ink' || overlay.sketch) &&
+        (overlay.points?.length ?? 0) > 1
+      ) {
         const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
         const points = (overlay.points ?? []).map((point) => displayPointToPdf({
           x: (overlay.x + point.x * overlay.width) * display.width,
@@ -174,24 +209,81 @@ export async function exportPdf(
         for (let index = 0; index < lines.length; index += 1) {
           const line = lines[index]
           if (!line) continue
-          const anchor = displayPointToPdf(
-            {
-              x: overlay.x * display.width + pad.x,
-              y: overlay.y * display.height + pad.y + fontSize + index * lineHeight,
-            },
-            pageWidth,
-            pageHeight,
-            quarterTurn,
-          )
-          page.drawText(line, {
-            x: anchor.x,
-            y: anchor.y,
-            size: fontSize,
-            font,
-            color,
-            opacity: overlay.opacity,
-            rotate: degrees(rotation),
-          })
+          const baseX = overlay.x * display.width + pad.x
+          const baseY = overlay.y * display.height + pad.y + fontSize + index * lineHeight
+          const drawAt = (textX: number, textY: number, fill = color, size = fontSize) => {
+            const anchor = displayPointToPdf(
+              { x: textX, y: textY },
+              pageWidth,
+              pageHeight,
+              quarterTurn,
+            )
+            page.drawText(line, {
+              x: anchor.x,
+              y: anchor.y,
+              size,
+              font,
+              color: fill,
+              opacity: overlay.opacity,
+              rotate: degrees(rotation),
+            })
+          }
+          const art = overlay.wordArt ?? 'plain'
+          if (art === 'shadow') {
+            drawAt(baseX + fontSize * 0.08, baseY + fontSize * 0.08, rgb(0.12, 0.12, 0.12))
+            drawAt(baseX, baseY)
+          } else if (art === 'outline') {
+            const offset = Math.max(0.6, fontSize * 0.06)
+            for (const [dx, dy] of [
+              [-offset, 0],
+              [offset, 0],
+              [0, -offset],
+              [0, offset],
+              [-offset, -offset],
+              [offset, offset],
+            ]) {
+              drawAt(baseX + dx, baseY + dy)
+            }
+            drawAt(baseX, baseY, rgb(1, 1, 1))
+          } else if (art === 'stack') {
+            for (let layer = 3; layer >= 1; layer -= 1) {
+              drawAt(
+                baseX + layer * fontSize * 0.06,
+                baseY + layer * fontSize * 0.06,
+                rgb(0.12, 0.12, 0.12),
+              )
+            }
+            drawAt(baseX, baseY)
+          } else if (art === 'arch') {
+            let cursor = 0
+            const letters = [...line]
+            for (let letterIndex = 0; letterIndex < letters.length; letterIndex += 1) {
+              const letter = letters[letterIndex]
+              const offset = archOffset(letterIndex, letters.length)
+              const width = font.widthOfTextAtSize(letter, fontSize)
+              const anchor = displayPointToPdf(
+                {
+                  x: baseX + cursor + width / 2,
+                  y: baseY + offset.y * fontSize,
+                },
+                pageWidth,
+                pageHeight,
+                quarterTurn,
+              )
+              page.drawText(letter, {
+                x: anchor.x,
+                y: anchor.y,
+                size: fontSize,
+                font,
+                color,
+                opacity: overlay.opacity,
+                rotate: degrees(rotation + offset.rotate),
+              })
+              cursor += width
+            }
+          } else {
+            drawAt(baseX, baseY)
+          }
         }
       } else if (overlay.type === 'highlight') {
         page.drawRectangle({
@@ -215,6 +307,54 @@ export async function exportPdf(
           borderColor: color,
           borderWidth: overlay.strokeWidth,
           borderOpacity: overlay.opacity,
+        })
+      } else if (overlay.type === 'diamond') {
+        const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+        const midX = (overlay.x + overlay.width / 2) * display.width
+        const midY = (overlay.y + overlay.height / 2) * display.height
+        const corners = [
+          { x: midX, y: overlay.y * display.height },
+          { x: (overlay.x + overlay.width) * display.width, y: midY },
+          { x: midX, y: (overlay.y + overlay.height) * display.height },
+          { x: overlay.x * display.width, y: midY },
+        ].map((point) =>
+          displayPointToPdf(point, pageWidth, pageHeight, quarterTurn),
+        )
+        for (let index = 0; index < corners.length; index += 1) {
+          page.drawLine({
+            start: corners[index],
+            end: corners[(index + 1) % corners.length],
+            thickness: overlay.strokeWidth,
+            color,
+            opacity: overlay.opacity,
+          })
+        }
+      } else if (overlay.type === 'arrow') {
+        const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+        const start = displayPointToPdf(
+          {
+            x: (overlay.x + 0.08 * overlay.width) * display.width,
+            y: (overlay.y + 0.82 * overlay.height) * display.height,
+          },
+          pageWidth,
+          pageHeight,
+          quarterTurn,
+        )
+        const end = displayPointToPdf(
+          {
+            x: (overlay.x + 0.92 * overlay.width) * display.width,
+            y: (overlay.y + 0.18 * overlay.height) * display.height,
+          },
+          pageWidth,
+          pageHeight,
+          quarterTurn,
+        )
+        page.drawLine({
+          start,
+          end,
+          thickness: overlay.strokeWidth,
+          color,
+          opacity: overlay.opacity,
         })
       } else {
         let lineOverlay: PageOverlay = overlay
