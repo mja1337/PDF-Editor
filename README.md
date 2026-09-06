@@ -14,7 +14,7 @@ A private, local-first PDF workspace designed for GitHub Pages. Documents are op
 - Select individual pages, toggle selections, select ranges, or select all pages for bulk edits.
 - Navigate by page number, keyboard, fit width, or fit page.
 - Search extracted text across the complete local document and jump between matches.
-- Analyse a document on demand to turn found text lines into editable boxes, with progress and cancellation.
+- Analyse a document on demand to turn found text lines into editable boxes, with progress and cancellation. Scanned pages can use an optional on-device Tesseract OCR engine served from this GitHub Pages site after you agree.
 - Browse embedded PDF outlines/bookmarks when present.
 - Add text boxes, highlights, underlines, strikeouts, rectangles, ellipses, and lines.
 - Select, move, resize, keyboard-nudge, recolour, restyle, copy, paste, duplicate, or delete annotations with undo/redo.
@@ -27,7 +27,7 @@ A private, local-first PDF workspace designed for GitHub Pages. Documents are op
 - Installable PWA shell with offline caching and update prompts.
 - Strict local-only content security policy.
 
-Freehand ink, signatures, stamps, forms, secure redaction, compression presets, OCR, and recovery storage are planned in [OVERHAUL_PLAN.md](./OVERHAUL_PLAN.md).
+Freehand ink, signatures, stamps, forms, secure redaction, compression presets, and recovery storage are planned in [OVERHAUL_PLAN.md](./OVERHAUL_PLAN.md).
 
 ## Development
 
@@ -56,8 +56,8 @@ For a custom domain hosted at its root, build with `BASE_PATH=/` instead.
 
 ## Privacy and independence
 
-- Runtime dependencies, the PDF.js worker, the service worker, icons, and styles are self-hosted in the build.
-- PDF bytes are not uploaded or sent to another origin.
+- Runtime dependencies, the PDF.js worker, the optional Tesseract OCR engine, the service worker, icons, and styles are self-hosted in the build.
+- PDF bytes are not uploaded or sent to another origin. OCR, when enabled, reads page images only in this browser after downloading the engine from this GitHub Pages origin.
 - The service worker precaches the application so it can reopen offline after the first successful visit.
 - The application contains no credentials, analytics, ads, or remote fonts.
 - Browser storage and memory limits still apply; the original file remains the user's source of truth.

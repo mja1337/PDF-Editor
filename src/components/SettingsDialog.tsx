@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LogoStampConfig, StampCorner } from '../domain/document'
-import { loadPreferences, savePreferences } from '../domain/preferences'
+import {
+  loadPreferences,
+  savePreferences,
+  type OcrConsent,
+} from '../domain/preferences'
+import { OCR_ENGINE_DISCLOSURE } from '../pdf/ocrEngine'
 
 const CORNERS: Array<{ id: StampCorner; label: string }> = [
   { id: 'top-left', label: 'Top left' },
@@ -39,6 +44,9 @@ export function SettingsDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [draft, setDraft] = useState<LogoStampConfig | null>(stamp)
+  const [ocrConsent, setOcrConsent] = useState<OcrConsent>(
+    () => loadPreferences().ocrConsent,
+  )
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -136,6 +144,47 @@ export function SettingsDialog({
             {error}
           </p>
         )}
+      </section>
+      <section>
+        <h3>Scanned-page OCR</h3>
+        <p>
+          Optional. After you allow it, Analyse can download {OCR_ENGINE_DISCLOSURE.engine}{' '}
+          ({OCR_ENGINE_DISCLOSURE.wrapper}) from {OCR_ENGINE_DISCLOSURE.filesFrom}.{' '}
+          {OCR_ENGINE_DISCLOSURE.languageData}. License: {OCR_ENGINE_DISCLOSURE.license}.
+          Recognition then stays in this browser; pages are never uploaded. First
+          download is {OCR_ENGINE_DISCLOSURE.sizeLabel}.
+        </p>
+        <p>
+          {ocrConsent === 'accepted'
+            ? 'OCR is allowed on this device. The engine is fetched from this site the first time a scan needs it.'
+            : ocrConsent === 'declined'
+              ? 'OCR is turned off on this device. Analyse still reads extractable PDF text.'
+              : 'OCR is not enabled yet. Analyse will ask if it finds pages without text.'}
+        </p>
+        <div className="signature-actions">
+          <button
+            type="button"
+            disabled={ocrConsent === 'accepted'}
+            onClick={() => {
+              const next = { ...loadPreferences(), ocrConsent: 'accepted' as const }
+              savePreferences(next)
+              setOcrConsent('accepted')
+            }}
+          >
+            Allow OCR
+          </button>
+          <button
+            type="button"
+            disabled={ocrConsent === 'declined'}
+            onClick={() => {
+              const next = { ...loadPreferences(), ocrConsent: 'declined' as const }
+              savePreferences(next)
+              setOcrConsent('declined')
+            }}
+          >
+            Don’t use OCR
+          </button>
+        </div>
       </section>
       <div className="signature-actions">
         <button type="button" onClick={onClose}>

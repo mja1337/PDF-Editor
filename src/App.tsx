@@ -61,6 +61,7 @@ import {
   useState,
 } from 'react'
 import { LazyThumbnail } from './components/LazyThumbnail'
+import { OcrConsentDialog } from './components/OcrConsentDialog'
 import { SettingsDialog } from './components/SettingsDialog'
 import { SignatureDialog } from './components/SignatureDialog'
 import type { AnnotationTool } from './components/AnnotationLayer'
@@ -79,7 +80,8 @@ import {
 } from './domain/document'
 import type { OverlayType, PageOverlay, WordArtStyle } from './domain/document'
 import { createDefaultOverlay, withSketchStyle } from './domain/overlays'
-import { loadPreferences } from './domain/preferences'
+import { loadPreferences, savePreferences } from './domain/preferences'
+import { platformOcrAvailable } from './pdf/ocr'
 import { WORD_ART_STYLES } from './pdf/wordArt'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
@@ -112,6 +114,22 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function analysingLabel(progress: string) {
+  return progress.includes(' / ') ? `Analysing ${progress}` : progress || 'Analysing…'
+}
+
+function scannedPageHint(ocrConsent: 'unset' | 'accepted' | 'declined') {
+  if (ocrConsent === 'accepted') {
+    return platformOcrAvailable()
+      ? 'No text was found with PDF data, this browser’s detector, or Tesseract OCR. The page is likely a photo or a language other than English.'
+      : 'No text was found with PDF data or Tesseract OCR. The page is likely a photo or a language other than English.'
+  }
+  if (platformOcrAvailable()) {
+    return 'No text was found, including with this browser’s on-device detector. You can download a local Tesseract engine from this GitHub Pages site in Settings to retry scans.'
+  }
+  return 'No extractable PDF text was found. You can download a local Tesseract engine from this GitHub Pages site in Settings to read scanned pages.'
 }
 
 function OverlayTextField({
@@ -236,6 +254,7 @@ export function App() {
     blocks: number
     pagesWithText: number
     emptyPages: number
+    ocrPages: number
   } | null>(null)
   const [watermarkText, setWatermarkText] = useState('')
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>('select')
@@ -245,6 +264,7 @@ export function App() {
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null)
   const [signatureOpen, setSignatureOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [ocrPromptOpen, setOcrPromptOpen] = useState(false)
   const [inkWidth, setInkWidth] = useState(2)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const addPdfInputRef = useRef<HTMLInputElement>(null)
@@ -380,6 +400,7 @@ export function App() {
         setSelectedOverlayId(null)
         setAnalyseSummary(null)
         setAnalyseProgress('')
+        setOcrPromptOpen(false)
       } else {
         const pages = sources.flatMap(createPagesForSource)
         dispatch({ type: 'append', sources, pages })
@@ -465,6 +486,7 @@ export function App() {
         setSelectedOverlayId(null)
         setAnalyseSummary(null)
         setAnalyseProgress('')
+        setOcrPromptOpen(false)
       } else {
         const pages = sources.flatMap(createPagesForSource)
         dispatch({ type: 'append', sources, pages })
@@ -599,6 +621,7 @@ export function App() {
     setContextTarget(null)
     setAnalyseSummary(null)
     setAnalyseProgress('')
+    setOcrPromptOpen(false)
   }, [])
 
   const focusPage = useCallback(
@@ -1097,11 +1120,14 @@ export function App() {
     setAnalyseProgress(`0 / ${editorDocument.pages.length}`)
     try {
       const { analyseEditorDocument } = await import('./pdf/text')
+      const ocrConsent = loadPreferences().ocrConsent
       const result = await analyseEditorDocument(
         sessionsRef.current,
         editorDocument,
         controller.signal,
-        (completed, total) => setAnalyseProgress(`${completed} / ${total}`),
+        (completed, total, label) =>
+          setAnalyseProgress(label ?? `${completed} / ${total}`),
+        ocrConsent === 'accepted' ? 'tesseract' : 'platform',
       )
       if (controller.signal.aborted) return
       dispatch({ type: 'replaceExtractedOverlays', overlays: result.overlays })
@@ -1109,7 +1135,9 @@ export function App() {
         blocks: result.blocks,
         pagesWithText: result.pagesWithText,
         emptyPages: result.emptyPages,
+        ocrPages: result.ocrPages,
       })
+      setOcrPromptOpen(result.emptyPages > 0 && ocrConsent === 'unset')
       setAnnotationTool('select')
       const first = result.overlays[0]
       if (first) {
@@ -1362,7 +1390,11 @@ export function App() {
       {busy === 'analysing' && (
         <div className="progress-banner" role="status">
           <LoaderCircle className="spin" size={16} />
-          <span>Analysing page {analyseProgress || '…'}</span>
+          <span>
+            {analyseProgress.includes(' / ')
+              ? `Analysing page ${analyseProgress}`
+              : analyseProgress || 'Analysing…'}
+          </span>
           <button
             type="button"
             onClick={() => analyseAbortRef.current?.abort()}
@@ -1778,7 +1810,7 @@ export function App() {
                   <ScanSearch size={16} />
                 )}
                 {busy === 'analysing'
-                  ? `Analysing ${analyseProgress}`
+                  ? analysingLabel(analyseProgress)
                   : analyseSummary
                     ? 'Re-analyse text'
                     : 'Analyse text'}
@@ -1786,12 +1818,12 @@ export function App() {
               {analyseSummary ? (
                 <p className="tool-hint">
                   {analyseSummary.blocks === 0
-                    ? 'No extractable text was found. Scanned pages stay images until OCR is added.'
-                    : `${analyseSummary.blocks} text block${analyseSummary.blocks === 1 ? '' : 's'} on ${analyseSummary.pagesWithText} page${analyseSummary.pagesWithText === 1 ? '' : 's'}${analyseSummary.emptyPages ? ` · ${analyseSummary.emptyPages} without text` : ''}. Click a line on the page to type. Re-analyse replaces extracted lines.`}
+                    ? scannedPageHint(loadPreferences().ocrConsent)
+                    : `${analyseSummary.blocks} text block${analyseSummary.blocks === 1 ? '' : 's'} on ${analyseSummary.pagesWithText} page${analyseSummary.pagesWithText === 1 ? '' : 's'}${analyseSummary.ocrPages ? ` · ${analyseSummary.ocrPages} read from scans` : ''}${analyseSummary.emptyPages ? ` · ${analyseSummary.emptyPages} without text` : ''}. Click a line on the page to type. Re-analyse replaces extracted lines.`}
                 </p>
               ) : (
                 <p className="tool-hint">
-                  Read every page locally, then turn found lines into editable boxes. This can take a while on large files.
+                  Read every page locally, then turn found lines into editable boxes. Scanned pages can use this browser’s on-device detector, or Tesseract OCR downloaded from this GitHub Pages site after you agree. Recognition stays in the browser.
                 </p>
               )}
               {selectedPage &&
@@ -2276,6 +2308,19 @@ export function App() {
       </div>
 
       <ServiceWorkerStatus />
+      {ocrPromptOpen && (
+        <OcrConsentDialog
+          onAccept={() => {
+            savePreferences({ ...loadPreferences(), ocrConsent: 'accepted' })
+            setOcrPromptOpen(false)
+            void analyseDocument()
+          }}
+          onDecline={() => {
+            savePreferences({ ...loadPreferences(), ocrConsent: 'declined' })
+            setOcrPromptOpen(false)
+          }}
+        />
+      )}
       {settingsOpen && (
         <SettingsDialog
           stamp={editorDocument?.stamp ?? loadPreferences().stamp}

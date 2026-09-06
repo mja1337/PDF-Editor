@@ -1,6 +1,7 @@
-import { createReadStream, cpSync, existsSync, statSync } from 'node:fs'
+import { createReadStream, cpSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, extname, join, relative, resolve } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -19,6 +20,23 @@ const PDFJS_MIME: Record<string, string> = {
   '.wasm': 'application/wasm',
   '.js': 'text/javascript',
   '.icc': 'application/vnd.iccprofile',
+}
+
+const TESSERACT_JS_ROOT = dirname(require.resolve('tesseract.js/package.json'))
+const TESSERACT_CORE_ROOT = dirname(require.resolve('tesseract.js-core/package.json'))
+const OCR_CORE_FILES = [
+  'tesseract-core-lstm.wasm.js',
+  'tesseract-core-simd-lstm.wasm.js',
+  'tesseract-core-relaxedsimd-lstm.wasm.js',
+] as const
+const TESSDATA_BEST_URL =
+  'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/eng.traineddata'
+const OCR_CACHE_DIR = resolve('.ocr-cache')
+const OCR_LANG_GZ = join(OCR_CACHE_DIR, 'eng.traineddata.gz')
+const OCR_MIME: Record<string, string> = {
+  '.js': 'text/javascript',
+  '.gz': 'application/gzip',
+  '.wasm': 'application/wasm',
 }
 
 function pdfjsPublicPath(url: string, base: string) {
@@ -78,11 +96,113 @@ function pdfjsAssetsPlugin(): Plugin {
   }
 }
 
+function ocrPublicPath(url: string, base: string) {
+  const path = decodeURIComponent(url.split('?')[0] ?? '')
+  const prefix = `${base.replace(/\/?$/, '/')}ocr/`
+  if (!path.startsWith(prefix)) return null
+  return path.slice(prefix.length)
+}
+
+async function ensureEnglishTessdata() {
+  if (existsSync(OCR_LANG_GZ) && statSync(OCR_LANG_GZ).size > 1024 * 1024) {
+    return OCR_LANG_GZ
+  }
+  mkdirSync(OCR_CACHE_DIR, { recursive: true })
+  const response = await fetch(TESSDATA_BEST_URL, {
+    headers: { 'User-Agent': 'pdf-editor-ocr-build' },
+  })
+  if (!response.ok) {
+    throw new Error(
+      `Could not download English tessdata_best (${response.status}). Build needs network access to ${TESSDATA_BEST_URL}`,
+    )
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (bytes.byteLength < 1024 * 1024) {
+    throw new Error('Downloaded tessdata_best file was too small to be valid.')
+  }
+  writeFileSync(OCR_LANG_GZ, gzipSync(bytes, { level: 4 }))
+  return OCR_LANG_GZ
+}
+
+function resolveOcrAsset(rest: string) {
+  const name = rest.split('/').filter(Boolean)[0]
+  if (!name) return null
+  if (name === 'worker.min.js') return join(TESSERACT_JS_ROOT, 'dist', 'worker.min.js')
+  if (name === 'eng.traineddata.gz') return OCR_LANG_GZ
+  if ((OCR_CORE_FILES as readonly string[]).includes(name)) {
+    return join(TESSERACT_CORE_ROOT, name)
+  }
+  return null
+}
+
+function sendOcrAsset(
+  url: string,
+  base: string,
+  response: ServerResponse,
+  next: () => void,
+) {
+  const rest = ocrPublicPath(url, base)
+  if (!rest) {
+    next()
+    return
+  }
+  const file = resolveOcrAsset(rest)
+  if (!file || !existsSync(file) || !statSync(file).isFile()) {
+    next()
+    return
+  }
+  response.setHeader('Content-Type', OCR_MIME[extname(file)] ?? 'application/octet-stream')
+  response.setHeader('Cache-Control', 'public, max-age=86400')
+  createReadStream(file).pipe(response)
+}
+
+function copyOcrAssets(outDir: string) {
+  const dest = join(outDir, 'ocr')
+  mkdirSync(dest, { recursive: true })
+  cpSync(join(TESSERACT_JS_ROOT, 'dist', 'worker.min.js'), join(dest, 'worker.min.js'))
+  for (const file of OCR_CORE_FILES) {
+    cpSync(join(TESSERACT_CORE_ROOT, file), join(dest, file))
+  }
+  cpSync(OCR_LANG_GZ, join(dest, 'eng.traineddata.gz'))
+}
+
+function ocrAssetsPlugin(): Plugin {
+  return {
+    name: 'ocr-assets',
+    async buildStart() {
+      if (process.env.VITEST) return
+      await ensureEnglishTessdata()
+    },
+    configureServer(server) {
+      if (process.env.VITEST) return
+      const ready = ensureEnglishTessdata().catch((error) => {
+        server.config.logger.warn(
+          `[ocr-assets] ${error instanceof Error ? error.message : String(error)}`,
+        )
+      })
+      const base = server.config.base
+      server.middlewares.use((request: IncomingMessage, response: ServerResponse, next) => {
+        if (!ocrPublicPath(request.url ?? '', base)) {
+          next()
+          return
+        }
+        void ready.then(() => sendOcrAsset(request.url ?? '', base, response, next))
+      })
+    },
+    async writeBundle(options) {
+      if (!options.dir) return
+      await ensureEnglishTessdata()
+      copyOcrAssets(options.dir)
+    },
+  }
+}
+
 export default defineConfig({
   base: repositoryBase,
   plugins: [
     react(),
     pdfjsAssetsPlugin(),
+    ocrAssetsPlugin(),
     VitePWA({
       registerType: 'prompt',
       includeAssets: ['icon.svg'],
@@ -108,11 +228,26 @@ export default defineConfig({
         globPatterns: [
           '**/*.{html,js,css,svg,mjs,wasm,woff,woff2,bcmap,pfb,ttf,otf,icc}',
         ],
+        globIgnores: ['**/ocr/**'],
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: false,
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
+        runtimeCaching: [
+          {
+            urlPattern: /\/ocr\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ocr-engine',
+              expiration: {
+                maxEntries: 16,
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
     }),
   ],

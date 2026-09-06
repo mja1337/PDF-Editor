@@ -1455,6 +1455,27 @@ input:focus-visible,
 .stamp-corners button[aria-pressed='true'] {
   background: #147d72;
 }
+.ocr-disclosure {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+.ocr-disclosure div {
+  display: grid;
+  gap: 2px;
+}
+.ocr-disclosure dt {
+  color: #8aa399;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ocr-disclosure dd {
+  margin: 0;
+  color: #d7e6df;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
 .annotation-layer.is-interactive.tool-eraser .annotation-ink { pointer-events: auto; cursor: crosshair; }
 .signature-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid #52665e; border-radius: 16px; color: #edf4f1; background: #151e1b; }
 .signature-dialog::backdrop { background: #0009; }

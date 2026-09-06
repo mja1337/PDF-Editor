@@ -4,6 +4,8 @@ import { createExtractedOverlay } from '../domain/overlays'
 import type { PdfSession } from './engine'
 import { classifyPdfFont } from './fontMatch'
 import { sampleNormalizedRect } from './pageSample'
+import { ocrRenderedPage } from './ocr'
+import type { OcrMode } from './ocrEngine'
 import {
   groupTextRuns,
   type ExtractedTextRun,
@@ -23,6 +25,7 @@ export interface DocumentTextAnalysis {
   blocks: number
   pagesWithText: number
   emptyPages: number
+  ocrPages: number
 }
 
 type Transform = [number, number, number, number, number, number]
@@ -144,31 +147,43 @@ export async function extractPageText(
   viewer: PDFDocumentProxy,
   pageIndex: number,
   rotationDelta: QuarterTurn = 0,
-): Promise<{ runs: ExtractedTextRun[]; pageText: string }> {
+  signal?: AbortSignal,
+  ocr: OcrMode = 'platform',
+  onStatus?: (status: string) => void,
+): Promise<{ runs: ExtractedTextRun[]; pageText: string; ocr: boolean }> {
   const page = await viewer.getPage(pageIndex + 1)
   const rotation = (page.rotate + rotationDelta + 360) % 360
   const viewport = page.getViewport({ scale: 1, rotation })
   const content = await page.getTextContent()
   const items = content.items.flatMap((item) => ('str' in item ? [item] : []))
-  const runs = await sampleRunAppearance(
+  let runs = await sampleRunAppearance(
     page,
     rotation,
     runsFromTextContent(items, content.styles, viewport, page),
   )
-  return {
-    runs,
-    pageText: pagePlainText(items),
+  let pageText = pagePlainText(items)
+  let usedOcr = false
+  if (runs.length === 0) {
+    const scanned = await ocrRenderedPage(page, rotation, signal, ocr, onStatus)
+    if (scanned.length > 0) {
+      runs = await sampleRunAppearance(page, rotation, scanned)
+      pageText = scanned.map((run) => run.text).join('\n')
+      usedOcr = true
+    }
   }
+  return { runs, pageText, ocr: usedOcr }
 }
 
 export async function analyseEditorDocument(
   sessions: ReadonlyMap<string, PdfSession>,
   document: EditorDocument,
   signal: AbortSignal,
-  onProgress?: (completed: number, total: number) => void,
+  onProgress?: (completed: number, total: number, label?: string) => void,
+  ocr: OcrMode = 'platform',
 ): Promise<DocumentTextAnalysis> {
   const pages: PageTextAnalysis[] = []
   const overlays: Array<{ pageId: string; overlay: PageOverlay }> = []
+  let ocrPages = 0
 
   for (let position = 0; position < document.pages.length; position += 1) {
     if (signal.aborted) throw new DOMException('Analysis cancelled.', 'AbortError')
@@ -179,7 +194,11 @@ export async function analyseEditorDocument(
       session.viewer,
       reference.sourcePageIndex,
       reference.rotationDelta,
+      signal,
+      ocr,
+      (status) => onProgress?.(position, document.pages.length, status),
     )
+    if (extracted.ocr) ocrPages += 1
     pages.push({
       pageId: reference.id,
       runs: extracted.runs,
@@ -201,5 +220,6 @@ export async function analyseEditorDocument(
     blocks: overlays.length,
     pagesWithText,
     emptyPages: pages.length - pagesWithText,
+    ocrPages,
   }
 }
