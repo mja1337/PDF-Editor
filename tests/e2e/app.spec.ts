@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { readFile } from 'node:fs/promises'
 
 async function fixtureBytes() {
@@ -141,6 +141,117 @@ test('selects a range, applies a bulk rotation, and searches local text', async 
   await expect(page.getByText('2 / 3', { exact: true })).toBeVisible()
 })
 
+test('renders page text and analyses it into editable lines', async ({ page }) => {
+  const missingAssets: string[] = []
+  page.on('response', (response) => {
+    if (response.url().includes('/pdfjs/') && response.status() >= 400) {
+      missingAssets.push(`${response.status()} ${response.url()}`)
+    }
+  })
+
+  await page.goto('./')
+  await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
+    name: 'analyse.pdf',
+    mimeType: 'application/pdf',
+    buffer: await fixtureBytes(),
+  })
+
+  const canvas = page.locator('.focused-page canvas')
+  await expect(page.locator('.focused-page .pdf-canvas-wrap')).toHaveAttribute(
+    'data-status',
+    'ready',
+  )
+  const painted = await canvas.evaluate((node) => {
+    const target = node as HTMLCanvasElement
+    const context = target.getContext('2d')
+    if (!context) return 0
+    const pixels = context.getImageData(0, 0, target.width, target.height).data
+    let ink = 0
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index] < 245 || pixels[index + 1] < 245 || pixels[index + 2] < 245) {
+        ink += 1
+      }
+    }
+    return ink
+  })
+  expect(painted, missingAssets.join('\n')).toBeGreaterThan(80)
+  expect(missingAssets).toEqual([])
+
+  await page.getByRole('button', { name: 'Analyse text' }).click()
+  await expect(page.getByText(/text block/i)).toBeVisible()
+  await page.getByRole('button', { name: 'extracted text annotation' }).first().click()
+  const pageEditor = page.getByRole('textbox', { name: 'Edit page text' })
+  await expect(pageEditor).toBeFocused()
+  await page.keyboard.type('X')
+  await pageEditor.press('Enter')
+  await expect(page.getByRole('button', { name: /Edited · .*Cover/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Edited · X$/ })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'extracted text annotation' }).first().click()
+  await expect(page.getByRole('textbox', { name: 'Edit page text' })).toBeFocused()
+  const beforeGrow = await page.locator('.annotation-extracted.is-editing').boundingBox()
+  await page.getByRole('textbox', { name: 'Edit page text' }).fill(
+    'A much longer replacement that should grow the original line box',
+  )
+  await page.getByRole('textbox', { name: 'Edit page text' }).press('Enter')
+  await expect(page.getByRole('button', { name: /Edited · A much longer replacement/i })).toBeVisible()
+  const afterGrow = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
+  expect(afterGrow?.width ?? 0).toBeGreaterThan((beforeGrow?.width ?? 0) + 8)
+})
+
+test('covers analysed text with the sampled page colour', async ({ page }) => {
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const leaf = pdf.addPage([300, 420])
+  leaf.drawRectangle({
+    x: 0,
+    y: 320,
+    width: 300,
+    height: 100,
+    color: rgb(0.82, 0.12, 0.12),
+  })
+  leaf.drawText('Header', {
+    x: 28,
+    y: 358,
+    size: 26,
+    font,
+    color: rgb(1, 1, 1),
+  })
+
+  await page.goto('./')
+  await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
+    name: 'header.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await pdf.save()),
+  })
+  await expect(page.locator('.focused-page .pdf-canvas-wrap')).toHaveAttribute(
+    'data-status',
+    'ready',
+  )
+  await page.getByRole('button', { name: 'Analyse text' }).click()
+  await expect(page.getByText(/text block/i)).toBeVisible()
+  await page.getByRole('button', { name: 'extracted text annotation' }).first().click()
+  const editor = page.getByRole('textbox', { name: 'Edit page text' })
+  await expect(editor).toHaveValue('Header')
+  await editor.press('End')
+  await page.keyboard.type('s')
+  const paint = await page.locator('.annotation-extracted.is-editing').evaluate((node) => {
+    const style = getComputedStyle(node)
+    const color = style.color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+    const background = style.backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+    return {
+      color: color?.slice(1, 4).map(Number) ?? [0, 0, 0],
+      background: background?.slice(1, 4).map(Number) ?? [255, 255, 255],
+    }
+  })
+  expect(paint.background[0]).toBeGreaterThan(150)
+  expect(paint.background[1]).toBeLessThan(90)
+  expect(paint.color[0]).toBeGreaterThan(180)
+  expect(paint.color[1]).toBeGreaterThan(180)
+  await editor.press('Enter')
+  await expect(page.getByRole('button', { name: /Edited · Headers/i })).toBeVisible()
+})
+
 test('creates, edits, moves, resizes, and exports annotations', async ({ page }) => {
   await page.goto('./')
   await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
@@ -153,10 +264,12 @@ test('creates, edits, moves, resizes, and exports annotations', async ({ page })
   await expect(layer).toBeVisible()
   await page.getByRole('button', { name: 'Text', exact: true }).click()
   await layer.click({ position: { x: 150, y: 120 } })
+  const pageEditor = page.getByRole('textbox', { name: 'Edit page text' })
+  await expect(pageEditor).toBeFocused()
+  await pageEditor.fill('Local review note')
+  await pageEditor.press('Enter')
   const textAnnotation = page.getByRole('button', { name: 'text annotation' })
   await expect(textAnnotation).toBeVisible()
-  await page.getByLabel('Text', { exact: true }).fill('Local review note')
-  await page.getByLabel('Text', { exact: true }).press('Tab')
 
   const beforeMove = await textAnnotation.boundingBox()
   expect(beforeMove).toBeTruthy()
@@ -245,6 +358,92 @@ test('shows relevant context actions for pages, canvas, and annotations', async 
   await rectangles.last().click({ button: 'right' })
   await annotationMenu.getByRole('menuitem', { name: 'Delete annotation' }).click()
   await expect(rectangles).toHaveCount(1)
+})
+
+test('draws reversible ink and exports signatures and ink in PNG at every rotation offline', async ({ page, context }) => {
+  await page.goto('./')
+  await page.evaluate(() => navigator.serviceWorker.ready)
+  await context.setOffline(true)
+  await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
+    name: 'signing.pdf', mimeType: 'application/pdf', buffer: await fixtureBytes(),
+  })
+  await page.getByRole('button', { name: 'Draw', exact: true }).filter({ visible: true }).click()
+  const layer = page.locator('.focused-page .annotation-layer')
+  const bounds = (await layer.boundingBox())!
+  await page.mouse.move(bounds.x + 60, bounds.y + 80)
+  await page.mouse.down()
+  await page.mouse.move(bounds.x + 160, bounds.y + 140, { steps: 15 })
+  await page.mouse.up()
+  await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(1)
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Redo', exact: true }).click()
+  await page.getByRole('button', { name: 'Erase stroke', exact: true }).click()
+  await page.getByRole('button', { name: 'ink annotation' }).click()
+  await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+
+  await page.getByRole('button', { name: 'Signature', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Your name').fill('Renée — Smith')
+  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
+  await page.getByRole('button', { name: 'signature annotation' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Duplicate annotation' }).click()
+  await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
+
+  for (let rotation = 0; rotation < 4; rotation += 1) {
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Page PNG', exact: true }).click()
+    const bytes = await readFile((await (await downloadPromise).path())!)
+    const colors = await page.evaluate(async (base64) => {
+      const image = new Image()
+      image.src = `data:image/png;base64,${base64}`
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.width; canvas.height = image.height
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(image, 0, 0)
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+      let red = 0; let blue = 0
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] > 140 && pixels[i] > pixels[i + 1] * 1.5 && pixels[i] > pixels[i + 2] * 1.5) red++
+        if (pixels[i + 2] > pixels[i] * 1.7 && pixels[i + 2] > pixels[i + 1] * 1.2) blue++
+      }
+      return { red, blue }
+    }, bytes.toString('base64'))
+    expect(colors.red).toBeGreaterThan(50)
+    expect(colors.blue).toBeGreaterThan(50)
+    await page.getByRole('button', { name: 'Right', exact: true }).click()
+  }
+  await context.setOffline(false)
+})
+
+test('creates drawn and uploaded signatures and reports unsupported text', async ({ page }) => {
+  await page.goto('./')
+  await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
+    name: 'signature-modes.pdf', mimeType: 'application/pdf', buffer: await fixtureBytes(),
+  })
+  await page.getByRole('button', { name: 'Signature', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('Your name').fill('世界')
+  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Unsupported text')
+  await dialog.getByRole('button', { name: 'Draw', exact: true }).click()
+  const bounds = (await dialog.locator('canvas').boundingBox())!
+  await page.mouse.move(bounds.x + 30, bounds.y + 40)
+  await page.mouse.down()
+  await page.mouse.move(bounds.x + 150, bounds.y + 90, { steps: 10 })
+  await page.mouse.up()
+  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
+  await page.getByRole('button', { name: 'Signature', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Upload', exact: true }).click()
+  await dialog.locator('input[type=file]').setInputFiles({ name: 'signature.png', mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') })
+  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
 })
 
 test('keeps a 100-page document virtualized', async ({ page }) => {

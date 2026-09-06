@@ -1,4 +1,5 @@
 import type { PDFDocument as PdfLibDocument } from 'pdf-lib'
+import { createOverlayFontLibrary, validateEditorText } from './fonts'
 import type {
   EditorDocument,
   PageOverlay,
@@ -10,6 +11,7 @@ import {
   overlayLineToPdf,
   overlayToPdfRect,
 } from './coordinates'
+import { overlayPadPx, wrapTextToWidth } from './textLayout'
 
 function copyMetadata(source: PdfLibDocument, output: PdfLibDocument) {
   const title = source.getTitle()
@@ -36,15 +38,12 @@ function colorComponents(hex: string): [number, number, number] {
   return [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255) as [number, number, number]
 }
 
-function winAnsiText(text: string) {
-  return text.replace(/[^\x20-\x7e\xa0-\xff]/g, '?')
-}
-
 export async function exportPdf(
   sourceBytes: ReadonlyMap<string, Uint8Array>,
   document: EditorDocument,
+  fontBytes?: Uint8Array,
 ): Promise<Uint8Array> {
-  const { PDFDocument, StandardFonts, degrees, rgb } = await import('pdf-lib')
+  const { PDFDocument, degrees, rgb } = await import('pdf-lib')
   const sourceDocuments = new Map<string, PdfLibDocument>()
 
   for (const source of document.sources) {
@@ -57,12 +56,22 @@ export async function exportPdf(
   }
 
   const output = await PDFDocument.create()
-  const needsFont =
-    Boolean(document.watermark) ||
-    document.pages.some((page) => page.overlays.some((overlay) => overlay.type === 'text'))
-  const annotationFont = needsFont
-    ? await output.embedFont(StandardFonts.HelveticaBold)
+  const textOverlays = document.pages.flatMap((page) =>
+    page.overlays.filter(
+      (overlay) => overlay.type === 'text' && (!overlay.extracted || overlay.edited),
+    ),
+  )
+  const needsFont = Boolean(document.watermark) || textOverlays.length > 0
+  const fonts = needsFont
+    ? await createOverlayFontLibrary(output, textOverlays, fontBytes)
     : null
+  if (fonts) {
+    if (document.watermark) validateEditorText(fonts.defaultFont, document.watermark.text)
+    for (const overlay of textOverlays) {
+      validateEditorText(fonts.fontFor(overlay), overlay.text || 'Add text')
+    }
+  }
+  const images = new Map<string, Awaited<ReturnType<typeof output.embedPng>>>()
   const primarySource = sourceDocuments.get(document.sources[0].id)
   if (primarySource) copyMetadata(primarySource, output)
 
@@ -75,9 +84,9 @@ export async function exportPdf(
     const sourceRotation = page.getRotation().angle
     const rotation = (sourceRotation + pageReference.rotationDelta + 360) % 360
     page.setRotation(degrees(rotation))
-    if (document.watermark && annotationFont) {
+    if (document.watermark && fonts) {
       const size = Math.max(18, Math.min(page.getWidth(), page.getHeight()) * 0.08)
-      const textWidth = annotationFont.widthOfTextAtSize(
+      const textWidth = fonts.defaultFont.widthOfTextAtSize(
         document.watermark.text,
         size,
       )
@@ -85,7 +94,7 @@ export async function exportPdf(
         x: page.getWidth() / 2 - textWidth / 2,
         y: page.getHeight() / 2,
         size,
-        font: annotationFont,
+        font: fonts.defaultFont,
         color: rgb(0.18, 0.22, 0.2),
         opacity: document.watermark.opacity,
         rotate: degrees(document.watermark.rotation),
@@ -106,27 +115,84 @@ export async function exportPdf(
         quarterTurn,
       )
 
-      if (overlay.type === 'text' && annotationFont) {
+      if (overlay.type === 'text' && overlay.extracted && !overlay.edited) {
+        continue
+      }
+
+      if (overlay.type === 'image' && overlay.imageData) {
+        let image = images.get(overlay.imageData)
+        if (!image) {
+          image = await output.embedPng(overlay.imageData)
+          images.set(overlay.imageData, image)
+        }
         const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
-        const fontSize = overlay.fontSize ?? 18
-        const anchor = displayPointToPdf(
-          {
-            x: overlay.x * display.width,
-            y: overlay.y * display.height + fontSize,
-          },
-          pageWidth,
-          pageHeight,
-          quarterTurn,
-        )
-        page.drawText(winAnsiText(overlay.text || 'Add text'), {
-          x: anchor.x,
-          y: anchor.y,
-          size: fontSize,
-          font: annotationFont,
-          color,
-          opacity: overlay.opacity,
-          rotate: degrees(rotation),
-        })
+        const anchor = displayPointToPdf({ x: overlay.x * display.width,
+          y: (overlay.y + overlay.height) * display.height }, pageWidth, pageHeight, quarterTurn)
+        page.drawImage(image, { ...anchor, width: overlay.width * display.width,
+          height: overlay.height * display.height, rotate: degrees(rotation), opacity: overlay.opacity })
+      } else if (overlay.type === 'ink') {
+        const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+        const points = (overlay.points ?? []).map((point) => displayPointToPdf({
+          x: (overlay.x + point.x * overlay.width) * display.width,
+          y: (overlay.y + point.y * overlay.height) * display.height,
+        }, pageWidth, pageHeight, quarterTurn))
+        for (let index = 1; index < points.length; index += 1) {
+          page.drawLine({ start: points[index - 1], end: points[index],
+            thickness: overlay.strokeWidth, color, opacity: overlay.opacity })
+        }
+      } else if (overlay.type === 'text' && fonts) {
+        if (overlay.cover) {
+          const [fillRed, fillGreen, fillBlue] = colorComponents(
+            overlay.backgroundColor ?? '#ffffff',
+          )
+          page.drawRectangle({
+            ...rect,
+            color: rgb(fillRed, fillGreen, fillBlue),
+            opacity: 1,
+          })
+        }
+        const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+        const font = fonts.fontFor(overlay)
+        const text = overlay.text || 'Add text'
+        let fontSize = overlay.fontSize ?? 18
+        const pad = overlayPadPx(overlay, 1)
+        const maxWidth = Math.max(1, overlay.width * display.width - pad.x * 2)
+        const lineHeight = fontSize * (overlay.extracted ? 1 : 1.15)
+        let lines: string[]
+        if (overlay.extracted || text.includes('\n')) {
+          lines = wrapTextToWidth(
+            text,
+            maxWidth,
+            (value) => font.widthOfTextAtSize(value, fontSize),
+          )
+        } else {
+          while (fontSize > 5 && font.widthOfTextAtSize(text, fontSize) > maxWidth) {
+            fontSize -= 0.25
+          }
+          lines = [text]
+        }
+        for (let index = 0; index < lines.length; index += 1) {
+          const line = lines[index]
+          if (!line) continue
+          const anchor = displayPointToPdf(
+            {
+              x: overlay.x * display.width + pad.x,
+              y: overlay.y * display.height + pad.y + fontSize + index * lineHeight,
+            },
+            pageWidth,
+            pageHeight,
+            quarterTurn,
+          )
+          page.drawText(line, {
+            x: anchor.x,
+            y: anchor.y,
+            size: fontSize,
+            font,
+            color,
+            opacity: overlay.opacity,
+            rotate: degrees(rotation),
+          })
+        }
       } else if (overlay.type === 'highlight') {
         page.drawRectangle({
           ...rect,

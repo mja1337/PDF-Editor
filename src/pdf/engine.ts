@@ -8,14 +8,42 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 GlobalWorkerOptions.workerSrc = workerUrl
 
 const MAX_FILE_SIZE = 250 * 1024 * 1024
+const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]
 
 export interface PdfSession {
   bytes: Uint8Array
   viewer: PDFDocumentProxy
 }
 
+function pdfjsAssetUrl(folder: 'cmaps' | 'standard_fonts' | 'wasm' | 'iccs') {
+  const base = import.meta.env.BASE_URL.endsWith('/')
+    ? import.meta.env.BASE_URL
+    : `${import.meta.env.BASE_URL}/`
+  return `${base}pdfjs/${folder}/`
+}
+
 function hasPdfSignature(bytes: Uint8Array) {
-  return new TextDecoder('ascii').decode(bytes.slice(0, 5)) === '%PDF-'
+  const head = bytes.subarray(0, Math.min(bytes.length, 1024))
+  for (let index = 0; index <= head.length - PDF_MAGIC.length; index += 1) {
+    if (PDF_MAGIC.every((value, offset) => head[index + offset] === value)) {
+      return true
+    }
+  }
+  return false
+}
+
+function documentLoadOptions(data: Uint8Array) {
+  return {
+    data,
+    cMapUrl: pdfjsAssetUrl('cmaps'),
+    cMapPacked: true,
+    standardFontDataUrl: pdfjsAssetUrl('standard_fonts'),
+    wasmUrl: pdfjsAssetUrl('wasm'),
+    iccUrl: pdfjsAssetUrl('iccs'),
+    useSystemFonts: true,
+    enableXfa: true,
+    stopAtErrors: false,
+  }
 }
 
 export async function openPdf(file: File): Promise<PdfSession> {
@@ -34,10 +62,7 @@ export async function openPdfBytes(bytes: Uint8Array): Promise<PdfSession> {
   }
 
   try {
-    const loadingTask = getDocument({
-      data: bytes.slice(),
-      stopAtErrors: true,
-    })
+    const loadingTask = getDocument(documentLoadOptions(bytes.slice()))
     const viewer = await loadingTask.promise
     return { bytes, viewer }
   } catch (error) {
@@ -69,7 +94,12 @@ export async function renderPageToPng(
 
   canvas.width = Math.ceil(viewport.width)
   canvas.height = Math.ceil(viewport.height)
-  await page.render({ canvas, canvasContext: context, viewport }).promise
+  await page.render({
+    canvas,
+    canvasContext: context,
+    viewport,
+    background: '#ffffff',
+  }).promise
 
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, 'image/png'),

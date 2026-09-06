@@ -86,7 +86,9 @@ export function LazyThumbnail({
               targetWidth={164}
               label={`Preview of page ${position + 1}`}
               watermark={watermark}
-              overlays={page.overlays}
+          overlays={page.overlays.filter(
+            (overlay) => !overlay.extracted || overlay.edited,
+          )}
             />
           ) : (
             <span className="thumbnail-placeholder" aria-hidden="true" />

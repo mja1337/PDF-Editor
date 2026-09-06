@@ -8,6 +8,8 @@ export type OverlayType =
   | 'rectangle'
   | 'ellipse'
   | 'line'
+  | 'ink'
+  | 'image'
 
 export interface PageOverlay {
   id: string
@@ -21,6 +23,16 @@ export interface PageOverlay {
   strokeWidth: number
   text?: string
   fontSize?: number
+  fontRole?: 'sans' | 'serif' | 'mono'
+  fontWeight?: 400 | 700
+  fontItalic?: boolean
+  points?: Array<{ x: number; y: number }>
+  imageData?: string
+  signature?: boolean
+  extracted?: boolean
+  edited?: boolean
+  cover?: boolean
+  backgroundColor?: string
 }
 
 export interface PageRef {
@@ -91,6 +103,10 @@ export type DocumentAction =
       pageId: string
       overlayId: string
       position: 'front' | 'back'
+    }
+  | {
+      type: 'replaceExtractedOverlays'
+      overlays: Array<{ pageId: string; overlay: PageOverlay }>
     }
   | { type: 'undo' }
   | { type: 'redo' }
@@ -283,11 +299,24 @@ export function documentReducer(
           page.id === action.pageId
             ? {
                 ...page,
-                overlays: page.overlays.map((overlay) =>
-                  overlay.id === action.overlayId
-                    ? normalizeOverlay({ ...overlay, ...action.changes })
-                    : overlay,
-                ),
+                overlays: page.overlays.map((overlay) => {
+                  if (overlay.id !== action.overlayId) return overlay
+                  const next = { ...overlay, ...action.changes }
+                  if (overlay.extracted && !overlay.edited) {
+                    const textChanged =
+                      'text' in action.changes && action.changes.text !== overlay.text
+                    const colorChanged =
+                      'color' in action.changes && action.changes.color !== overlay.color
+                    const fontChanged =
+                      'fontSize' in action.changes &&
+                      action.changes.fontSize !== overlay.fontSize
+                    if (textChanged || colorChanged || fontChanged) {
+                      next.edited = true
+                      next.cover = true
+                    }
+                  }
+                  return normalizeOverlay(next)
+                }),
               }
             : page,
         ),
@@ -326,6 +355,8 @@ export function documentReducer(
           id: action.duplicateId,
           x: overlay.x + 0.025,
           y: overlay.y + 0.025,
+          extracted: false,
+          edited: false,
         })
         return {
           ...document,
@@ -360,6 +391,30 @@ export function documentReducer(
             candidate.id === action.pageId ? { ...candidate, overlays } : candidate,
           ),
         }
+      })
+
+    case 'replaceExtractedOverlays':
+      return commit(history, (document) => {
+        const incoming = new Map<string, PageOverlay[]>()
+        for (const { pageId, overlay } of action.overlays) {
+          const list = incoming.get(pageId) ?? []
+          list.push(normalizeOverlay(overlay))
+          incoming.set(pageId, list)
+        }
+        let changed = false
+        const pages = document.pages.map((page) => {
+          const kept = page.overlays.filter((overlay) => !overlay.extracted)
+          const added = incoming.get(page.id) ?? []
+          if (
+            kept.length === page.overlays.length &&
+            added.length === 0
+          ) {
+            return page
+          }
+          changed = true
+          return { ...page, overlays: [...kept, ...added] }
+        })
+        return changed ? { ...document, pages } : document
       })
 
     case 'undo': {
@@ -441,7 +496,7 @@ export function normalizeOverlay(overlay: PageOverlay): PageOverlay {
     height,
     opacity: clamp(overlay.opacity, 0.05, 1),
     strokeWidth: clamp(overlay.strokeWidth, 0.5, 12),
-    fontSize: overlay.fontSize ? clamp(overlay.fontSize, 6, 96) : undefined,
+    fontSize: overlay.fontSize ? clamp(overlay.fontSize, 4, 288) : undefined,
   }
 }
 

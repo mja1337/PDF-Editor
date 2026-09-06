@@ -36,9 +36,10 @@ async function pageText(document: PDFDocumentProxy, pageIndex: number) {
   const page = await document.getPage(pageIndex + 1)
   const content = await page.getTextContent()
   const text = content.items
-    .map((item) => ('str' in item ? item.str : ''))
-    .join(' ')
-    .replace(/\s+/g, ' ')
+    .map((item) => ('str' in item ? `${item.str}${item.hasEOL ? '\n' : ' '}` : ''))
+    .join('')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n+/g, '\n')
     .trim()
   cache.set(pageIndex, text)
   return text

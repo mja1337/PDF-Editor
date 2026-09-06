@@ -5,6 +5,7 @@ import type {
   QuarterTurn,
   WatermarkConfig,
 } from '../domain/document'
+import { sampleOverlayPixels, type SampledAppearance } from '../pdf/pageSample'
 import { AnnotationLayer, type AnnotationTool } from './AnnotationLayer'
 
 interface PdfCanvasProps {
@@ -20,6 +21,8 @@ interface PdfCanvasProps {
   interactiveAnnotations?: boolean
   annotationTool?: AnnotationTool
   annotationColor?: string
+  annotationStrokeWidth?: number
+  onEraseOverlay?: (overlayId: string) => void
   selectedOverlayId?: string | null
   onCreateOverlay?: (overlay: PageOverlay) => void
   onSelectOverlay?: (overlayId: string | null) => void
@@ -47,6 +50,8 @@ export function PdfCanvas({
   interactiveAnnotations,
   annotationTool,
   annotationColor,
+  annotationStrokeWidth,
+  onEraseOverlay,
   selectedOverlayId,
   onCreateOverlay,
   onSelectOverlay,
@@ -97,6 +102,7 @@ export function PdfCanvas({
           canvas,
           canvasContext: context,
           viewport,
+          background: '#ffffff',
           transform:
             pixelRatio === 1
               ? undefined
@@ -136,6 +142,12 @@ export function PdfCanvas({
     }
   }, [document, pageIndex, rotationDelta, targetHeight, targetWidth, watermark])
 
+  const sampleAppearance = (overlay: PageOverlay): SampledAppearance | null => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    return sampleOverlayPixels(canvas, overlay, display.width, display.height)
+  }
+
   return (
     <div className={`pdf-canvas-wrap ${className ?? ''}`} data-status={status}>
       {status === 'loading' && <div className="canvas-skeleton" aria-hidden="true" />}
@@ -154,10 +166,13 @@ export function PdfCanvas({
           interactive={interactiveAnnotations}
           tool={annotationTool}
           color={annotationColor}
+          strokeWidth={annotationStrokeWidth}
+          onErase={onEraseOverlay}
           selectedOverlayId={selectedOverlayId}
           onCreate={onCreateOverlay}
           onSelect={onSelectOverlay}
           onChange={onChangeOverlay}
+          sampleAppearance={sampleAppearance}
           onPageContextMenu={onPageContextMenu}
           onOverlayContextMenu={onOverlayContextMenu}
         />

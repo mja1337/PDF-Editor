@@ -14,6 +14,7 @@ A private, local-first PDF workspace designed for GitHub Pages. Documents are op
 - Select individual pages, toggle selections, select ranges, or select all pages for bulk edits.
 - Navigate by page number, keyboard, fit width, or fit page.
 - Search extracted text across the complete local document and jump between matches.
+- Analyse a document on demand to turn found text lines into editable boxes, with progress and cancellation.
 - Browse embedded PDF outlines/bookmarks when present.
 - Add text boxes, highlights, underlines, strikeouts, rectangles, ellipses, and lines.
 - Select, move, resize, keyboard-nudge, recolour, restyle, copy, paste, duplicate, or delete annotations with undo/redo.
@@ -63,7 +64,7 @@ For a custom domain hosted at its root, build with `BASE_PATH=/` instead.
 
 ## Known scope boundary
 
-The current export engine does not support true editing of arbitrary existing page text or password decryption. Secure redaction and lossy transformations will be added only with explicit fidelity warnings and verification tests.
+The current export engine does not rewrite original PDF content streams. Analysed text can be edited by covering the original line visually; the source glyphs remain until a later secure-redaction mode. Password decryption is not supported.
 
 ## License
 

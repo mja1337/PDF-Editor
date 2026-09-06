@@ -32,6 +32,7 @@ import {
   RotateCcw,
   RotateCw,
   ShieldCheck,
+  ScanSearch,
   Scissors,
   Search,
   SendToBack,
@@ -56,6 +57,7 @@ import {
   useState,
 } from 'react'
 import { LazyThumbnail } from './components/LazyThumbnail'
+import { SignatureDialog } from './components/SignatureDialog'
 import type { AnnotationTool } from './components/AnnotationLayer'
 import {
   ContextMenu,
@@ -72,9 +74,19 @@ import {
 } from './domain/document'
 import type { OverlayType, PageOverlay } from './domain/document'
 import { createDefaultOverlay } from './domain/overlays'
-import type { PdfSession } from './pdf/engine'
+import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
 import type { OutlineEntry, SearchResult } from './pdf/navigation'
+
+function userFacingError(error: unknown, fallback: string) {
+  if (
+    error instanceof TypeError &&
+    /Failed to fetch dynamically imported module/i.test(error.message)
+  ) {
+    return 'The editor lost its connection to the local app. Refresh the page. If that does not help, restart npm run dev.'
+  }
+  return error instanceof Error ? error.message : fallback
+}
 
 type ViewMode = 'width' | 'page' | 'custom'
 type NavigatorMode = 'pages' | 'outline' | 'search'
@@ -93,6 +105,35 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function OverlayTextField({
+  overlay,
+  onCommit,
+}: {
+  overlay: PageOverlay
+  onCommit: (text: string) => void
+}) {
+  const [draft, setDraft] = useState(overlay.text ?? '')
+  const [source, setSource] = useState({ id: overlay.id, text: overlay.text ?? '' })
+  if (overlay.id !== source.id || overlay.text !== source.text) {
+    setSource({ id: overlay.id, text: overlay.text ?? '' })
+    setDraft(overlay.text ?? '')
+  }
+
+  return (
+    <textarea
+      aria-label="Text"
+      value={draft}
+      maxLength={4000}
+      rows={overlay.extracted ? 4 : 2}
+      onChange={(event) => setDraft(event.currentTarget.value)}
+      onBlur={() => {
+        const next = overlay.extracted ? draft : draft.trim() || 'Add text'
+        if (next !== (overlay.text ?? '')) onCommit(next)
+      }}
+    />
+  )
 }
 
 async function destroySession(session: PdfSession | null) {
@@ -158,7 +199,13 @@ export function App() {
   )
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null)
   const [busy, setBusy] = useState<
-    'opening' | 'adding' | 'exporting' | 'extracting' | 'rendering' | null
+    | 'opening'
+    | 'adding'
+    | 'exporting'
+    | 'extracting'
+    | 'rendering'
+    | 'analysing'
+    | null
   >(null)
   const [error, setError] = useState<string | null>(null)
   const [isDraggingFile, setIsDraggingFile] = useState(false)
@@ -177,12 +224,20 @@ export function App() {
     'idle' | 'searching' | 'ready'
   >('idle')
   const [searchProgress, setSearchProgress] = useState('')
+  const [analyseProgress, setAnalyseProgress] = useState('')
+  const [analyseSummary, setAnalyseSummary] = useState<{
+    blocks: number
+    pagesWithText: number
+    emptyPages: number
+  } | null>(null)
   const [watermarkText, setWatermarkText] = useState('')
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>('select')
   const [annotationColor, setAnnotationColor] = useState('#e05252')
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [overlayClipboard, setOverlayClipboard] = useState<PageOverlay | null>(null)
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null)
+  const [signatureOpen, setSignatureOpen] = useState(false)
+  const [inkWidth, setInkWidth] = useState(2)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const addPdfInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
@@ -192,6 +247,7 @@ export function App() {
   const loadSequence = useRef(0)
   const selectionAnchorRef = useRef<string | null>(null)
   const searchAbortRef = useRef<AbortController | null>(null)
+  const analyseAbortRef = useRef<AbortController | null>(null)
   const online = useOnlineStatus()
   const editorDocument = history.present
 
@@ -254,6 +310,7 @@ export function App() {
   useEffect(
     () => () => {
       searchAbortRef.current?.abort()
+      analyseAbortRef.current?.abort()
       void destroySessions(sessionsRef.current)
     },
     [],
@@ -262,13 +319,13 @@ export function App() {
   const loadPdfFiles = useCallback(async (files: File[], replace: boolean) => {
     if (files.length === 0) return
     searchAbortRef.current?.abort()
+    analyseAbortRef.current?.abort()
     const sequence = ++loadSequence.current
     setBusy(replace ? 'opening' : 'adding')
     setError(null)
     const imported: Array<{ sourceId: string; session: PdfSession; file: File }> = []
 
     try {
-      const { openPdf } = await import('./pdf/engine')
       for (const file of files) {
         const sourceId = crypto.randomUUID()
         imported.push({ sourceId, session: await openPdf(file), file })
@@ -312,6 +369,8 @@ export function App() {
         setWatermarkText('')
         setAnnotationTool('select')
         setSelectedOverlayId(null)
+        setAnalyseSummary(null)
+        setAnalyseProgress('')
       } else {
         const pages = sources.flatMap(createPagesForSource)
         dispatch({ type: 'append', sources, pages })
@@ -331,11 +390,7 @@ export function App() {
       await destroySessions(
         new Map(imported.map(({ sourceId, session }) => [sourceId, session])),
       )
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : 'The PDF could not be opened.',
-      )
+      setError(userFacingError(loadError, 'The PDF could not be opened.'))
     } finally {
       if (sequence === loadSequence.current) setBusy(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -346,16 +401,14 @@ export function App() {
   const loadImageFiles = useCallback(async (files: File[], replace: boolean) => {
     if (files.length === 0) return
     searchAbortRef.current?.abort()
+    analyseAbortRef.current?.abort()
     const sequence = ++loadSequence.current
     setBusy(replace ? 'opening' : 'adding')
     setError(null)
     const imported: Array<{ sourceId: string; session: PdfSession; name: string; size: number }> = []
 
     try {
-      const [{ openPdfBytes }, { imageToPdf }] = await Promise.all([
-        import('./pdf/engine'),
-        import('./pdf/importImages'),
-      ])
+      const { imageToPdf } = await import('./pdf/importImages')
       for (const file of files) {
         const converted = await imageToPdf(file)
         const sourceId = crypto.randomUUID()
@@ -400,6 +453,8 @@ export function App() {
         setWatermarkText('')
         setAnnotationTool('select')
         setSelectedOverlayId(null)
+        setAnalyseSummary(null)
+        setAnalyseProgress('')
       } else {
         const pages = sources.flatMap(createPagesForSource)
         dispatch({ type: 'append', sources, pages })
@@ -419,11 +474,7 @@ export function App() {
       await destroySessions(
         new Map(imported.map(({ sourceId, session }) => [sourceId, session])),
       )
-      setError(
-        importError instanceof Error
-          ? importError.message
-          : 'The images could not be imported.',
-      )
+      setError(userFacingError(importError, 'The images could not be imported.'))
     } finally {
       if (sequence === loadSequence.current) setBusy(null)
       if (imageInputRef.current) imageInputRef.current.value = ''
@@ -448,8 +499,8 @@ export function App() {
     try {
       const bytes = await exportPdf(sourceBytes(), editorDocument)
       downloadPdf(bytes, editorDocument.name)
-    } catch {
-      setError('The edited PDF could not be exported. Your source file is unchanged.')
+    } catch (cause) {
+      setError(userFacingError(cause, 'The edited PDF could not be exported. Your source file is unchanged.'))
     } finally {
       setBusy(null)
     }
@@ -494,24 +545,28 @@ export function App() {
     setBusy('rendering')
     setError(null)
     try {
-      const { renderPageToPng } = await import('./pdf/engine')
-      const blob = await renderPageToPng(
-        selectedSession.viewer,
-        selectedPage.sourcePageIndex,
-        selectedPage.rotationDelta,
-      )
+      const bytes = await exportPdf(sourceBytes(), {
+        ...editorDocument,
+        sources: editorDocument.sources.filter(({ id }) => id === selectedPage.sourceDocumentId),
+        pages: [selectedPage],
+      })
+      const rendered = await openPdfBytes(bytes)
+      let blob: Blob
+      try { blob = await renderPageToPng(rendered.viewer, 0, 0) }
+      finally { await destroySession(rendered) }
       const baseName = editorDocument.name.replace(/\.pdf$/i, '') || 'document'
       downloadBlob(blob, `${baseName}-page-${selectedIndex + 1}.png`)
-    } catch {
-      setError('The selected page could not be rendered as a PNG image.')
+    } catch (cause) {
+      setError(userFacingError(cause, 'The selected page could not be rendered as a PNG image.'))
     } finally {
       setBusy(null)
     }
-  }, [busy, editorDocument, selectedIndex, selectedPage, selectedSession])
+  }, [busy, editorDocument, selectedIndex, selectedPage, selectedSession, sourceBytes])
 
   const closeDocument = useCallback(async () => {
     ++loadSequence.current
     searchAbortRef.current?.abort()
+    analyseAbortRef.current?.abort()
     await destroySessions(sessionsRef.current)
     sessionsRef.current = new Map()
     setSessions(new Map())
@@ -532,6 +587,8 @@ export function App() {
     setSelectedOverlayId(null)
     setOverlayClipboard(null)
     setContextTarget(null)
+    setAnalyseSummary(null)
+    setAnalyseProgress('')
   }, [])
 
   const focusPage = useCallback(
@@ -639,7 +696,7 @@ export function App() {
       if (!selectedPage) return
       dispatch({ type: 'addOverlay', pageId: selectedPage.id, overlay })
       setSelectedOverlayId(overlay.id)
-      setAnnotationTool('select')
+      if (overlay.type !== 'ink') setAnnotationTool('select')
     },
     [selectedPage],
   )
@@ -680,6 +737,8 @@ export function App() {
       id: crypto.randomUUID(),
       x: Math.min(1 - overlayClipboard.width, overlayClipboard.x + 0.025),
       y: Math.min(1 - overlayClipboard.height, overlayClipboard.y + 0.025),
+      extracted: false,
+      edited: false,
     }
     dispatch({ type: 'addOverlay', pageId: selectedPage.id, overlay })
     setSelectedOverlayId(overlay.id)
@@ -825,6 +884,8 @@ export function App() {
 
     if (contextTarget.kind === 'canvas') {
       return [
+        { id: 'draw-ink', label: 'Draw on page', onSelect: () => setAnnotationTool('ink') },
+        { id: 'signature', label: 'Add signature', onSelect: () => setSignatureOpen(true) },
         {
           id: 'add-text',
           label: 'Add text here',
@@ -991,11 +1052,56 @@ export function App() {
       }
     } catch (searchError) {
       if (!(searchError instanceof DOMException) || searchError.name !== 'AbortError') {
-        setError('The document search could not be completed.')
+        setError(userFacingError(searchError, 'The document search could not be completed.'))
         setSearchStatus('idle')
       }
     }
   }, [editorDocument, searchQuery])
+
+  const analyseDocument = useCallback(async () => {
+    if (!editorDocument || busy) return
+    analyseAbortRef.current?.abort()
+    const controller = new AbortController()
+    analyseAbortRef.current = controller
+    setBusy('analysing')
+    setError(null)
+    setAnalyseProgress(`0 / ${editorDocument.pages.length}`)
+    try {
+      const { analyseEditorDocument } = await import('./pdf/text')
+      const result = await analyseEditorDocument(
+        sessionsRef.current,
+        editorDocument,
+        controller.signal,
+        (completed, total) => setAnalyseProgress(`${completed} / ${total}`),
+      )
+      if (controller.signal.aborted) return
+      dispatch({ type: 'replaceExtractedOverlays', overlays: result.overlays })
+      setAnalyseSummary({
+        blocks: result.blocks,
+        pagesWithText: result.pagesWithText,
+        emptyPages: result.emptyPages,
+      })
+      setAnnotationTool('select')
+      const first = result.overlays[0]
+      if (first) {
+        setSelectedPageId(first.pageId)
+        setSelectedPageIds(new Set([first.pageId]))
+        selectionAnchorRef.current = first.pageId
+        setSelectedOverlayId(first.overlay.id)
+      } else {
+        setSelectedOverlayId(null)
+      }
+    } catch (analyseError) {
+      if (!(analyseError instanceof DOMException) || analyseError.name !== 'AbortError') {
+        setError(userFacingError(analyseError, 'The document text could not be analysed.'))
+      }
+    } finally {
+      if (analyseAbortRef.current === controller) {
+        setBusy(null)
+        setAnalyseProgress('')
+      }
+    }
+  }, [busy, editorDocument])
 
   const showOutline = useCallback(async () => {
     setNavigatorMode('outline')
@@ -1023,6 +1129,7 @@ export function App() {
       const key = event.key.toLowerCase()
 
       if (event.defaultPrevented) return
+      if (signatureOpen) return
       if (command && key === 'o') {
         event.preventDefault()
         fileInputRef.current?.click()
@@ -1082,6 +1189,7 @@ export function App() {
     selectedIndex,
     selectedOverlay,
     selectedPage,
+    signatureOpen,
   ])
 
   const openFilePicker = () => fileInputRef.current?.click()
@@ -1175,12 +1283,16 @@ export function App() {
               </button>
               <button
                 type="button"
-                className="toolbar-button toolbar-label-optional"
+                className="toolbar-button"
                 disabled={busy !== null}
-                onClick={() => imageInputRef.current?.click()}
+                onClick={() => void analyseDocument()}
               >
-                <FilePlus2 size={17} />
-                <span>Add images</span>
+                {busy === 'analysing' ? (
+                  <LoaderCircle className="spin" size={17} />
+                ) : (
+                  <ScanSearch size={17} />
+                )}
+                <span>{busy === 'analysing' ? 'Analysing…' : 'Analyse'}</span>
               </button>
             </>
           )}
@@ -1212,6 +1324,18 @@ export function App() {
           <span>{error}</span>
           <button type="button" aria-label="Dismiss error" onClick={() => setError(null)}>
             <X size={17} />
+          </button>
+        </div>
+      )}
+      {busy === 'analysing' && (
+        <div className="progress-banner" role="status">
+          <LoaderCircle className="spin" size={16} />
+          <span>Analysing page {analyseProgress || '…'}</span>
+          <button
+            type="button"
+            onClick={() => analyseAbortRef.current?.abort()}
+          >
+            Cancel
           </button>
         </div>
       )}
@@ -1558,6 +1682,8 @@ export function App() {
                     interactiveAnnotations
                     annotationTool={annotationTool}
                     annotationColor={annotationColor}
+                    annotationStrokeWidth={inkWidth}
+                    onEraseOverlay={(overlayId) => dispatch({ type: 'deleteOverlay', pageId: selectedPage.id, overlayId })}
                     selectedOverlayId={selectedOverlayId}
                     onCreateOverlay={addOverlay}
                     onSelectOverlay={setSelectedOverlayId}
@@ -1604,9 +1730,68 @@ export function App() {
               <CheckCircle2 size={18} />
             </div>
 
+            <section className="tool-section text-analysis-tools">
+              <h3>Document text</h3>
+              <button
+                type="button"
+                className="analyse-button"
+                disabled={busy !== null}
+                onClick={() => void analyseDocument()}
+              >
+                {busy === 'analysing' ? (
+                  <LoaderCircle className="spin" size={16} />
+                ) : (
+                  <ScanSearch size={16} />
+                )}
+                {busy === 'analysing'
+                  ? `Analysing ${analyseProgress}`
+                  : analyseSummary
+                    ? 'Re-analyse text'
+                    : 'Analyse text'}
+              </button>
+              {analyseSummary ? (
+                <p className="tool-hint">
+                  {analyseSummary.blocks === 0
+                    ? 'No extractable text was found. Scanned pages stay images until OCR is added.'
+                    : `${analyseSummary.blocks} text block${analyseSummary.blocks === 1 ? '' : 's'} on ${analyseSummary.pagesWithText} page${analyseSummary.pagesWithText === 1 ? '' : 's'}${analyseSummary.emptyPages ? ` · ${analyseSummary.emptyPages} without text` : ''}. Click a line on the page to type. Re-analyse replaces extracted lines.`}
+                </p>
+              ) : (
+                <p className="tool-hint">
+                  Read every page locally, then turn found lines into editable boxes. This can take a while on large files.
+                </p>
+              )}
+              {selectedPage &&
+                selectedPage.overlays.some((overlay) => overlay.extracted) && (
+                  <ul className="extracted-text-list">
+                    {selectedPage.overlays
+                      .filter((overlay) => overlay.extracted)
+                      .map((overlay) => (
+                        <li key={overlay.id}>
+                          <button
+                            type="button"
+                            className={
+                              selectedOverlayId === overlay.id ? 'is-active' : ''
+                            }
+                            onClick={() => {
+                              setAnnotationTool('select')
+                              setSelectedOverlayId(overlay.id)
+                            }}
+                          >
+                            {overlay.edited ? 'Edited · ' : ''}
+                            {overlay.text || 'Empty line'}
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+            </section>
+
             <section className="tool-section annotation-tools">
               <h3>Annotate</h3>
               <div className="annotation-tool-grid">
+                <button type="button" aria-pressed={annotationTool === 'ink'} onClick={() => setAnnotationTool('ink')}>Draw</button>
+                <button type="button" aria-pressed={annotationTool === 'eraser'} onClick={() => setAnnotationTool('eraser')}>Erase stroke</button>
+                <button type="button" onClick={() => setSignatureOpen(true)}>Signature</button>
                 <button
                   type="button"
                   className={annotationTool === 'select' ? 'is-active' : ''}
@@ -1672,8 +1857,14 @@ export function App() {
                   <Slash size={16} /> Line
                 </button>
               </div>
+              {annotationTool === 'ink' && <div className="ink-controls">
+                <label>Ink colour <input type="color" value={annotationColor} onChange={(event) => setAnnotationColor(event.target.value)} /></label>
+                <label>Ink thickness <select value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))}>
+                  {[1, 2, 4, 8].map((weight) => <option key={weight} value={weight}>{weight} pt</option>)}
+                </select></label>
+              </div>}
               {annotationTool !== 'select' && (
-                <p className="tool-hint">Click the page to place the annotation.</p>
+                <p className="tool-hint">{annotationTool === 'ink' ? 'Drag to draw. Each stroke can be undone separately.' : annotationTool === 'eraser' ? 'Click a drawn stroke to remove it. Undo restores it.' : 'Click the page to place the annotation.'}</p>
               )}
             </section>
 
@@ -1683,18 +1874,20 @@ export function App() {
                 {selectedOverlay.type === 'text' && (
                   <label>
                     <span>Text</span>
-                    <input
-                      key={selectedOverlay.id}
-                      type="text"
-                      defaultValue={selectedOverlay.text}
-                      maxLength={240}
-                      onBlur={(event) =>
-                        updateSelectedOverlay(selectedOverlay.id, {
-                          text: event.currentTarget.value || 'Add text',
-                        })
+                    <OverlayTextField
+                      overlay={selectedOverlay}
+                      onCommit={(text) =>
+                        updateSelectedOverlay(selectedOverlay.id, { text })
                       }
                     />
                   </label>
+                )}
+                {selectedOverlay.extracted && (
+                  <p className="tool-hint">
+                    {selectedOverlay.edited
+                      ? 'Export covers the original line with a white box and draws this replacement. The original PDF text remains in the file.'
+                      : 'Click the line on the page and type. Export covers the original visually; the source glyphs stay in the file.'}
+                  </p>
                 )}
                 <label className="color-control">
                   <span>Colour</span>
@@ -1925,6 +2118,15 @@ export function App() {
       </footer>
 
       <div className="mobile-page-actions" aria-label="Mobile page tools">
+        <button
+          type="button"
+          disabled={!selectedPage || busy !== null}
+          onClick={() => void analyseDocument()}
+        >
+          {busy === 'analysing' ? 'Analysing…' : 'Analyse'}
+        </button>
+        <button type="button" disabled={!selectedPage} onClick={() => setAnnotationTool(annotationTool === 'ink' ? 'select' : 'ink')}>{annotationTool === 'ink' ? 'Select' : 'Draw'}</button>
+        <button type="button" disabled={!selectedPage} onClick={() => setSignatureOpen(true)}>Sign</button>
         <IconButton label="Move selected pages earlier" disabled={!canMoveEarlier} onClick={() => moveSelected(-1)}>
           <ArrowLeft size={18} />
         </IconButton>
@@ -1943,6 +2145,13 @@ export function App() {
       </div>
 
       <ServiceWorkerStatus />
+      {signatureOpen && selectedPage && <SignatureDialog
+        onClose={() => setSignatureOpen(false)}
+        onInsert={(overlay) => {
+          const canvas = stageRef.current?.querySelector('canvas')
+          const bounds = canvas?.getBoundingClientRect()
+          addOverlay({ ...overlay, height: Math.min(0.8, overlay.height * (bounds ? bounds.width / bounds.height : 1)) })
+        }} />}
 
       {contextTarget && (
         <ContextMenu

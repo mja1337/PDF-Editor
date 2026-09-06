@@ -214,4 +214,120 @@ describe('documentReducer', () => {
       duplicated.present,
     )
   })
+
+  it('replaces extracted text in one history step and marks edits as covered', () => {
+    const loaded = loadedDocument()
+    const analysed = documentReducer(loaded, {
+      type: 'replaceExtractedOverlays',
+      overlays: [
+        {
+          pageId: 'fixture:page:0',
+          overlay: {
+            id: 'line-1',
+            type: 'text',
+            x: 0.1,
+            y: 0.1,
+            width: 0.4,
+            height: 0.05,
+            color: '#1a1f1d',
+            opacity: 1,
+            strokeWidth: 1,
+            text: 'Cover page',
+            fontSize: 14,
+            extracted: true,
+          },
+        },
+      ],
+    })
+    expect(
+      analysed.present?.pages[0].overlays.map((overlay) => overlay.id),
+    ).toEqual(['line-1'])
+
+    const withUserNote = documentReducer(analysed, {
+      type: 'addOverlay',
+      pageId: 'fixture:page:0',
+      overlay: {
+        id: 'note',
+        type: 'text',
+        x: 0.2,
+        y: 0.4,
+        width: 0.3,
+        height: 0.08,
+        color: '#e05252',
+        opacity: 1,
+        strokeWidth: 2,
+        text: 'Keep me',
+        fontSize: 18,
+      },
+    })
+    const edited = documentReducer(withUserNote, {
+      type: 'updateOverlay',
+      pageId: 'fixture:page:0',
+      overlayId: 'line-1',
+      changes: { text: 'Edited cover' },
+    })
+    expect(edited.present?.pages[0].overlays[0]).toMatchObject({
+      text: 'Edited cover',
+      extracted: true,
+      edited: true,
+      cover: true,
+    })
+
+    const moved = documentReducer(analysed, {
+      type: 'updateOverlay',
+      pageId: 'fixture:page:0',
+      overlayId: 'line-1',
+      changes: { x: 0.2, y: 0.15 },
+    })
+    expect(moved.present?.pages[0].overlays[0]).toMatchObject({
+      text: 'Cover page',
+      extracted: true,
+    })
+    expect(moved.present?.pages[0].overlays[0]?.edited).toBeFalsy()
+    expect(moved.present?.pages[0].overlays[0]?.cover).toBeFalsy()
+
+    const sampled = documentReducer(analysed, {
+      type: 'updateOverlay',
+      pageId: 'fixture:page:0',
+      overlayId: 'line-1',
+      changes: { backgroundColor: '#c41e1e' },
+    })
+    expect(sampled.present?.pages[0].overlays[0]).toMatchObject({
+      backgroundColor: '#c41e1e',
+      extracted: true,
+    })
+    expect(sampled.present?.pages[0].overlays[0]?.edited).toBeFalsy()
+
+    const reanalysed = documentReducer(edited, {
+      type: 'replaceExtractedOverlays',
+      overlays: [
+        {
+          pageId: 'fixture:page:0',
+          overlay: {
+            id: 'line-2',
+            type: 'text',
+            x: 0.1,
+            y: 0.12,
+            width: 0.5,
+            height: 0.05,
+            color: '#1a1f1d',
+            opacity: 1,
+            strokeWidth: 1,
+            text: 'Fresh line',
+            fontSize: 14,
+            extracted: true,
+          },
+        },
+      ],
+    })
+    expect(
+      reanalysed.present?.pages[0].overlays.map((overlay) => ({
+        id: overlay.id,
+        text: overlay.text,
+      })),
+    ).toEqual([
+      { id: 'note', text: 'Keep me' },
+      { id: 'line-2', text: 'Fresh line' },
+    ])
+  })
 })
