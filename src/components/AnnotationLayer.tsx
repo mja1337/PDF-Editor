@@ -190,13 +190,16 @@ function TextEditor({
   }, [overlay, renderScale])
 
   useEffect(() => {
-    const node = ref.current
     const timer = window.setTimeout(() => {
       allowBlur.current = true
-      node?.focus({ preventScroll: true })
+      const node = ref.current
+      if (!node) return
+      // Leave the caret alone if the editor already has focus.
+      if (document.activeElement === node) return
+      node.focus({ preventScroll: true })
       if (!overlay.extracted) {
-        node?.select()
-      } else if (caretIndex != null && node) {
+        node.select()
+      } else if (caretIndex != null) {
         const index = Math.max(0, Math.min(node.value.length, caretIndex))
         node.setSelectionRange(index, index)
       }

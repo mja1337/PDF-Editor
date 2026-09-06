@@ -232,9 +232,10 @@ test('covers analysed text with the sampled page colour', async ({ page }) => {
   await expect(page.getByText(/text block/i)).toBeVisible()
   await page.getByRole('button', { name: 'extracted text annotation' }).first().click()
   const editor = page.getByRole('textbox', { name: 'Edit page text' })
+  await expect(editor).toBeFocused()
   await expect(editor).toHaveValue('Header')
-  await editor.press('End')
-  await page.keyboard.type('s')
+  await editor.fill('Headers')
+  await expect(editor).toHaveValue('Headers')
   const paint = await page.locator('.annotation-extracted.is-editing').evaluate((node) => {
     const style = getComputedStyle(node)
     const color = style.color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
@@ -249,7 +250,9 @@ test('covers analysed text with the sampled page colour', async ({ page }) => {
   expect(paint.color[0]).toBeGreaterThan(180)
   expect(paint.color[1]).toBeGreaterThan(180)
   await editor.press('Enter')
+  await expect(editor).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Edited · Headers/i })).toBeVisible()
+  await expect(page.locator('.focused-page .annotation-extracted.is-edited')).toBeVisible()
 })
 
 test('creates, edits, moves, resizes, and exports annotations', async ({ page }) => {
