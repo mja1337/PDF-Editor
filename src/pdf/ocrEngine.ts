@@ -15,7 +15,7 @@ export const OCR_ENGINE_DISCLOSURE = {
 } as const
 
 const LSTM_ONLY = 1
-const SINGLE_BLOCK = '6'
+const AUTO_PAGE = '3'
 
 type TesseractBrowser = {
   createWorker: typeof import('tesseract.js').createWorker
@@ -206,8 +206,14 @@ export async function recognizeScannedImage(
   image: Blob,
   signal?: AbortSignal,
   onStatus?: (status: string) => void,
+  options?: { dpi?: number },
 ) {
   const worker = await ensureTesseractWorker(signal, onStatus)
+  await worker.setParameters({
+    tessedit_pageseg_mode: AUTO_PAGE as PSM,
+    preserve_interword_spaces: '1',
+    user_defined_dpi: String(Math.max(70, Math.round(options?.dpi ?? 220))),
+  })
   const native = nativeTesseractWorker(worker)
   return await new Promise<Awaited<ReturnType<Worker['recognize']>>>((resolve, reject) => {
     let settled = false
@@ -261,7 +267,8 @@ export async function ensureTesseractWorker(
       const tess = tesseractBrowserApi(await import('tesseract.js'))
       const worker = await createSameOriginWorker(tess.createWorker, onStatus)
       await worker.setParameters({
-        tessedit_pageseg_mode: SINGLE_BLOCK as PSM,
+        tessedit_pageseg_mode: AUTO_PAGE as PSM,
+        preserve_interword_spaces: '1',
       })
       return worker
     })().catch((error) => {

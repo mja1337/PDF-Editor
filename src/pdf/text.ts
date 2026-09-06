@@ -166,7 +166,9 @@ export async function extractPageText(
   if (runs.length === 0) {
     const scanned = await ocrRenderedPage(page, rotation, signal, ocr, onStatus)
     if (scanned.length > 0) {
-      runs = await sampleRunAppearance(page, rotation, scanned)
+      runs = scanned[0]?.color
+        ? scanned
+        : await sampleRunAppearance(page, rotation, scanned)
       pageText = scanned.map((run) => run.text).join('\n')
       usedOcr = true
     }

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { parsePreferences } from '../src/domain/preferences'
 import {
+  cleanupOcrText,
   detectionsToRuns,
+  fittedOcrFontSize,
+  guessOcrFace,
   platformOcrAvailable,
+  tesseractLinesToRuns,
   tesseractWordBoxesToRuns,
 } from '../src/pdf/ocr'
 import {
@@ -48,7 +52,54 @@ describe('Tesseract word boxes', () => {
       2,
     )
     expect(runs.map((run) => run.text)).toEqual(['Invoice total'])
-    expect(runs[0]?.fontSize).toBeCloseTo(8)
+    expect(runs[0]?.fontSize).toBeCloseTo(6.08)
+  })
+
+  it('keeps Tesseract line boxes instead of flattening the page into one row', () => {
+    const runs = tesseractLinesToRuns(
+      [
+        {
+          words: [
+            { text: 'Hello', confidence: 90, bbox: { x0: 20, y0: 40, x1: 80, y1: 56 } },
+            { text: 'world', confidence: 88, bbox: { x0: 88, y0: 40, x1: 150, y1: 56 } },
+          ],
+        },
+        {
+          words: [
+            { text: 'Next', confidence: 91, bbox: { x0: 20, y0: 80, x1: 70, y1: 96 } },
+          ],
+        },
+      ],
+      400,
+      200,
+      2,
+    )
+    expect(runs.map((run) => run.text)).toEqual(['Hello world', 'Next'])
+  })
+})
+
+describe('OCR replacement type', () => {
+  it('cleans spacing and fits a line size to the scanned box width', () => {
+    expect(cleanupOcrText('  Total ,  $12 ')).toBe('Total, $12')
+    expect(fittedOcrFontSize('Hello', 100, 20, 2, (px, text) => text.length * px * 0.5)).toBeCloseTo(
+      9,
+    )
+  })
+
+  it('treats even character widths as mono and dense ink as bold', () => {
+    expect(
+      guessOcrFace(
+        [
+          { text: 'ABC', width: 30, height: 10 },
+          { text: 'DEF', width: 30, height: 10 },
+          { text: 'GHI', width: 30, height: 10 },
+        ],
+        0.2,
+      ),
+    ).toMatchObject({ fontRole: 'mono', fontWeight: 400 })
+    expect(guessOcrFace([{ text: 'Hi', width: 20, height: 12 }], 0.5)).toMatchObject({
+      fontWeight: 700,
+    })
   })
 })
 

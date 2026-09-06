@@ -61,6 +61,8 @@ function mergeLine(runs: ExtractedTextRun[]): ExtractedTextRun {
     fontRole: face.fontRole ?? 'sans',
     fontWeight: face.fontWeight ?? 400,
     fontItalic: face.fontItalic ?? false,
+    color: face.color,
+    backgroundColor: face.backgroundColor,
   }
 }
 
