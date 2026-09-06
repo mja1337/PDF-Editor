@@ -41,10 +41,8 @@ export function workerSourceLooksLikeHtml(source: string) {
   return head.includes('<!doctype html') || head.includes('<html')
 }
 
-export function lstmCoreFileName(simd: boolean, relaxedSimd: boolean) {
-  if (relaxedSimd) return 'tesseract-core-relaxedsimd-lstm.wasm.js'
-  if (simd) return 'tesseract-core-simd-lstm.wasm.js'
-  return 'tesseract-core-lstm.wasm.js'
+export function lstmCoreFileName(simd: boolean) {
+  return simd ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js'
 }
 
 function publicBaseUrl() {
@@ -70,7 +68,6 @@ const FRIENDLY_STATUS: Record<string, string> = {
 }
 
 let workerPromise: Promise<Worker> | null = null
-let workerScriptObjectUrl: string | null = null
 
 function friendlyStatus(status: string) {
   return FRIENDLY_STATUS[status] ?? status
@@ -91,11 +88,19 @@ export function ocrFailure(cause: unknown) {
 
 async function detectLstmCoreFile() {
   try {
-    const { relaxedSimd, simd } = await import('wasm-feature-detect')
-    return lstmCoreFileName(await simd(), await relaxedSimd())
+    const { simd } = await import('wasm-feature-detect')
+    return lstmCoreFileName(await simd())
   } catch {
-    return lstmCoreFileName(false, false)
+    return lstmCoreFileName(false)
   }
+}
+
+function isUnusableCoreError(cause: unknown) {
+  const detail =
+    cause instanceof Error
+      ? `${cause.message} ${cause.cause instanceof Error ? cause.cause.message : ''}`
+      : String(cause)
+  return /missing function|DotProductSSE|Aborted\(/i.test(detail)
 }
 
 async function sameOriginWorkerScriptUrl() {
@@ -108,21 +113,17 @@ async function sameOriginWorkerScriptUrl() {
   if (workerSourceLooksLikeHtml(source)) {
     throw ocrFailure('The OCR worker was replaced by the site HTML. Hard-refresh, then try again.')
   }
-  if (workerScriptObjectUrl) URL.revokeObjectURL(workerScriptObjectUrl)
-  workerScriptObjectUrl = URL.createObjectURL(
-    new Blob([source], { type: 'application/javascript' }),
-  )
-  return workerScriptObjectUrl
+  return url
 }
 
-async function createSameOriginWorker(
+async function startTesseractWorker(
   createWorker: TesseractBrowser['createWorker'],
+  coreFile: string,
+  workerPath: string,
+  langPath: string,
   onStatus?: (status: string) => void,
 ) {
-  const langPath = absoluteAssetUrl(`${ocrAssetDirectoryUrl()}/`)
-  const workerPath = await sameOriginWorkerScriptUrl()
-  const corePath = absoluteAssetUrl(`${ocrAssetDirectoryUrl()}/${await detectLstmCoreFile()}`)
-
+  const corePath = absoluteAssetUrl(`${ocrAssetDirectoryUrl()}/${coreFile}`)
   return await new Promise<Worker>((resolve, reject) => {
     let settled = false
     const fail = (cause: unknown) => {
@@ -160,6 +161,33 @@ async function createSameOriginWorker(
       },
     )
   })
+}
+
+async function createSameOriginWorker(
+  createWorker: TesseractBrowser['createWorker'],
+  onStatus?: (status: string) => void,
+) {
+  const langPath = absoluteAssetUrl(`${ocrAssetDirectoryUrl()}/`)
+  const workerPath = await sameOriginWorkerScriptUrl()
+  const preferred = await detectLstmCoreFile()
+  const fallback = lstmCoreFileName(false)
+  const cores = preferred === fallback ? [preferred] : [preferred, fallback]
+  let lastError: unknown
+  for (const coreFile of cores) {
+    try {
+      return await startTesseractWorker(
+        createWorker,
+        coreFile,
+        workerPath,
+        langPath,
+        onStatus,
+      )
+    } catch (error) {
+      lastError = error
+      if (!isUnusableCoreError(error) || coreFile === fallback) throw error
+    }
+  }
+  throw lastError instanceof Error ? lastError : ocrFailure(lastError)
 }
 
 export async function ensureTesseractWorker(

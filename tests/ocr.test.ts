@@ -65,11 +65,8 @@ describe('Tesseract browser API', () => {
   })
 
   it('picks the LSTM core file and rejects HTML served in place of the worker', () => {
-    expect(lstmCoreFileName(false, false)).toBe('tesseract-core-lstm.wasm.js')
-    expect(lstmCoreFileName(true, false)).toBe('tesseract-core-simd-lstm.wasm.js')
-    expect(lstmCoreFileName(true, true)).toBe(
-      'tesseract-core-relaxedsimd-lstm.wasm.js',
-    )
+    expect(lstmCoreFileName(false)).toBe('tesseract-core-lstm.wasm.js')
+    expect(lstmCoreFileName(true)).toBe('tesseract-core-simd-lstm.wasm.js')
     expect(workerSourceLooksLikeHtml('<!doctype html><html><body>app</body></html>')).toBe(
       true,
     )

@@ -26,8 +26,9 @@ const TESSERACT_JS_ROOT = dirname(require.resolve('tesseract.js/package.json'))
 const TESSERACT_CORE_ROOT = dirname(require.resolve('tesseract.js-core/package.json'))
 const OCR_CORE_FILES = [
   'tesseract-core-lstm.wasm.js',
+  'tesseract-core-lstm.wasm',
   'tesseract-core-simd-lstm.wasm.js',
-  'tesseract-core-relaxedsimd-lstm.wasm.js',
+  'tesseract-core-simd-lstm.wasm',
 ] as const
 const TESSDATA_BEST_URL =
   'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/eng.traineddata'
