@@ -149,6 +149,6 @@ export async function flattenScannedPageEdits(
     canvas.height = 0
     return jpeg
   } finally {
-    await session.viewer.destroy()
+    await session.viewer.loadingTask.destroy()
   }
 }
