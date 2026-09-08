@@ -139,28 +139,43 @@ export function sketchEllipsePoints(seed: number): SketchPoint[] {
   return points
 }
 
-export function sketchLinePoints(seed: number): SketchPoint[] {
+export function sketchLineBetween(
+  start: SketchPoint,
+  end: SketchPoint,
+  seed: number,
+  roughness = 0.014,
+): SketchPoint[] {
   const next = rng(seed)
   return wobbleSegment(
-    { x: 0.04 + jitter(next, 0.012), y: 0.86 + jitter(next, 0.012) },
-    { x: 0.96 + jitter(next, 0.012), y: 0.14 + jitter(next, 0.012) },
+    { x: start.x + jitter(next, roughness * 0.85), y: start.y + jitter(next, roughness * 0.85) },
+    { x: end.x + jitter(next, roughness * 0.85), y: end.y + jitter(next, roughness * 0.85) },
     next,
-    0.014,
+    roughness,
   )
 }
 
-export function sketchArrowPoints(seed: number): SketchPoint[] {
+export function sketchLinePoints(seed: number): SketchPoint[] {
+  return sketchLineBetween({ x: 0.04, y: 0.86 }, { x: 0.96, y: 0.14 }, seed)
+}
+
+export function sketchArrowBetween(
+  start: SketchPoint,
+  end: SketchPoint,
+  seed: number,
+  roughness = 0.014,
+  headSize?: number,
+): SketchPoint[] {
   const next = rng(seed)
-  const shaft = sketchLinePoints(seed)
-  const tip = shaft.at(-1) ?? { x: 0.9, y: 0.2 }
-  const previous = shaft.at(-2) ?? { x: 0.7, y: 0.4 }
+  const shaft = sketchLineBetween(start, end, seed, roughness)
+  const tip = shaft.at(-1) ?? end
+  const previous = shaft.at(-2) ?? start
   const dx = tip.x - previous.x
   const dy = tip.y - previous.y
   const length = Math.hypot(dx, dy) || 1
   const ux = dx / length
   const uy = dy / length
-  const head = 0.11 + next() * 0.025
-  const spread = 0.42 + next() * 0.08
+  const head = headSize ?? 0.11 + next() * 0.025
+  const spread = headSize ? 0.48 : 0.42 + next() * 0.08
   const left = {
     x: tip.x - ux * head + -uy * head * spread,
     y: tip.y - uy * head + ux * head * spread,
@@ -174,6 +189,10 @@ export function sketchArrowPoints(seed: number): SketchPoint[] {
     y: tip.y - uy * head * 0.18,
   }
   return joinStrokes([shaft, [left, neck, tip], [right, neck, tip]])
+}
+
+export function sketchArrowPoints(seed: number): SketchPoint[] {
+  return sketchArrowBetween({ x: 0.04, y: 0.86 }, { x: 0.96, y: 0.14 }, seed)
 }
 
 export function sketchPointsFor(

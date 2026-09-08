@@ -1,4 +1,4 @@
-# PDF Editor
+# pdfe
 
 A private, local-first PDF workspace designed for GitHub Pages. Documents are opened, rendered, edited, and exported entirely in the browser. The production application has no backend and makes no required third-party requests.
 

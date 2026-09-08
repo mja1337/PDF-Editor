@@ -1,6 +1,7 @@
 import type { LogoStampConfig } from './document'
 
-const STORAGE_KEY = 'pdf-editor.preferences'
+const STORAGE_KEY = 'pdfe.preferences'
+const LEGACY_STORAGE_KEY = 'pdf-editor.preferences'
 
 export type OcrConsent = 'unset' | 'accepted' | 'declined'
 
@@ -63,7 +64,9 @@ export function parsePreferences(raw: string | null): EditorPreferences {
 export function loadPreferences(): EditorPreferences {
   if (typeof localStorage === 'undefined') return emptyPreferences
   try {
-    return parsePreferences(localStorage.getItem(STORAGE_KEY))
+    return parsePreferences(
+      localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY),
+    )
   } catch {
     return emptyPreferences
   }

@@ -320,6 +320,17 @@ test('creates, edits, moves, resizes, and exports annotations', async ({ page })
   await layer.click({ position: { x: 230, y: 260 } })
   await expect(page.getByRole('button', { name: 'rectangle annotation' })).toBeVisible()
 
+  await page.getByRole('button', { name: 'Line', exact: true }).click()
+  const layerBox = (await layer.boundingBox())!
+  await page.mouse.move(layerBox.x + 48, layerBox.y + 210)
+  await page.mouse.down()
+  await page.mouse.move(layerBox.x + 220, layerBox.y + 214, { steps: 8 })
+  await page.mouse.up()
+  const drawnLine = page.getByRole('button', { name: 'line annotation' })
+  await expect(drawnLine).toBeVisible()
+  const lineBox = await drawnLine.boundingBox()
+  expect(lineBox!.width).toBeGreaterThan((lineBox!.height ?? 0) * 2)
+
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Export PDF' }).click()
   const outputPath = await (await downloadPromise).path()

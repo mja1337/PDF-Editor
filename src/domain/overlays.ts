@@ -1,5 +1,16 @@
 import type { OverlayType, PageOverlay, WordArtStyle } from './document'
 import { normalizeOverlay } from './document'
+import {
+  boxFromCorners,
+  boxFromSegment,
+  clampPoint,
+  constrainDrag,
+  isLinearOverlay,
+  lineEndpoints,
+  localPoint,
+  pagePoint,
+  type PagePoint,
+} from '../pdf/shapeGeometry'
 import { sketchPointsFor } from '../pdf/sketch'
 
 const SKETCH_TYPES = new Set<OverlayType>([
@@ -10,12 +21,20 @@ const SKETCH_TYPES = new Set<OverlayType>([
   'diamond',
 ])
 
+function sketchSeed() {
+  return Math.floor(Math.random() * 1_000_000)
+}
+
+export function nextSketchSeed() {
+  return sketchSeed()
+}
+
 export function createDefaultOverlay(
   type: OverlayType,
   x: number,
   y: number,
   color: string,
-  options?: { wordArt?: WordArtStyle },
+  options?: { wordArt?: WordArtStyle; id?: string; sketchSeed?: number },
 ): PageOverlay {
   const sizes: Record<OverlayType, { width: number; height: number }> = {
     text: { width: 0.38, height: 0.09 },
@@ -24,18 +43,18 @@ export function createDefaultOverlay(
     strikeout: { width: 0.34, height: 0.045 },
     rectangle: { width: 0.27, height: 0.16 },
     ellipse: { width: 0.24, height: 0.15 },
-    line: { width: 0.27, height: 0.12 },
-    arrow: { width: 0.28, height: 0.14 },
+    line: { width: 0.22, height: 0.02 },
+    arrow: { width: 0.24, height: 0.02 },
     diamond: { width: 0.2, height: 0.16 },
     ink: { width: 0.3, height: 0.15 },
     image: { width: 0.3, height: 0.15 },
   }
   const size = sizes[type]
   const sketch = SKETCH_TYPES.has(type)
-  const sketchSeed = sketch ? Math.floor(Math.random() * 1_000_000) : undefined
+  const seed = sketch ? (options?.sketchSeed ?? sketchSeed()) : options?.sketchSeed
   const isText = type === 'text'
   return normalizeOverlay({
-    id: crypto.randomUUID(),
+    id: options?.id ?? crypto.randomUUID(),
     type,
     x: x - size.width / 2,
     y: y - size.height / 2,
@@ -50,12 +69,16 @@ export function createDefaultOverlay(
     fontWeight: isText ? 900 : undefined,
     wordArt: isText ? (options?.wordArt ?? 'plain') : undefined,
     sketch,
-    sketchSeed,
-    points:
-      sketch && sketchSeed != null && type !== 'ink'
+    sketchSeed: seed,
+    points: isLinearOverlay(type)
+      ? [
+          { x: 0.03, y: 0.5 },
+          { x: 0.97, y: 0.5 },
+        ]
+      : sketch && seed != null && type !== 'ink'
         ? sketchPointsFor(
             type as 'rectangle' | 'ellipse' | 'line' | 'arrow' | 'diamond',
-            sketchSeed,
+            seed,
           )
         : undefined,
   })
@@ -96,6 +119,60 @@ export function createExtractedOverlay(run: {
     cover: false,
     backgroundColor: run.backgroundColor ?? '#ffffff',
   })
+}
+
+export function applyLineEndpoints(
+  overlay: PageOverlay,
+  start: PagePoint,
+  end: PagePoint,
+): PageOverlay {
+  const from = clampPoint(start)
+  const to = clampPoint(end)
+  const box = boxFromSegment(from, to)
+  const localStart = localPoint(from, box)
+  const localEnd = localPoint(to, box)
+  const seed = overlay.sketchSeed ?? sketchSeed()
+  return normalizeOverlay({
+    ...overlay,
+    ...box,
+    sketchSeed: overlay.sketch ? seed : overlay.sketchSeed,
+    points: isLinearOverlay(overlay.type)
+      ? [localStart, localEnd]
+      : overlay.points,
+  })
+}
+
+export function createDrawnOverlay(
+  type: OverlayType,
+  start: PagePoint,
+  end: PagePoint,
+  color: string,
+  options?: {
+    wordArt?: WordArtStyle
+    shift?: boolean
+    pageAspect?: number
+    id?: string
+    sketchSeed?: number
+  },
+): PageOverlay {
+  const from = clampPoint(start)
+  const to = constrainDrag(type, from, end, Boolean(options?.shift), options?.pageAspect ?? 1)
+  if (isLinearOverlay(type)) {
+    const template = createDefaultOverlay(type, from.x, from.y, color, options)
+    return applyLineEndpoints(template, from, to)
+  }
+  const box = boxFromCorners(from, to)
+  const overlay = createDefaultOverlay(type, from.x, from.y, color, options)
+  return normalizeOverlay({
+    ...overlay,
+    ...box,
+    wordArt: options?.wordArt ?? overlay.wordArt,
+  })
+}
+
+export function pageEndpoints(overlay: PageOverlay): [PagePoint, PagePoint] {
+  const [start, end] = lineEndpoints(overlay)
+  return [pagePoint(start, overlay), pagePoint(end, overlay)]
 }
 
 export function createInkOverlay(
@@ -153,7 +230,6 @@ export function createLineMark(
 }
 
 export function withSketchStyle(overlay: PageOverlay, sketch: boolean): Partial<PageOverlay> {
-  if (!sketch) return { sketch: false }
   const type = overlay.type
   if (
     type !== 'rectangle' &&
@@ -162,13 +238,28 @@ export function withSketchStyle(overlay: PageOverlay, sketch: boolean): Partial<
     type !== 'arrow' &&
     type !== 'diamond'
   ) {
-    return { sketch: true }
+    return { sketch }
   }
-  const sketchSeed = overlay.sketchSeed ?? Math.floor(Math.random() * 1_000_000)
+  if (!sketch) {
+    if (isLinearOverlay(type)) {
+      const [start, end] = lineEndpoints(overlay)
+      return { sketch: false, points: [start, end] }
+    }
+    return { sketch: false }
+  }
+  const seed = overlay.sketchSeed ?? sketchSeed()
+  if (isLinearOverlay(type)) {
+    const [start, end] = lineEndpoints(overlay)
+    return {
+      sketch: true,
+      sketchSeed: seed,
+      points: [start, end],
+    }
+  }
   return {
     sketch: true,
-    sketchSeed,
-    points: overlay.points ?? sketchPointsFor(type, sketchSeed),
+    sketchSeed: seed,
+    points: overlay.points ?? sketchPointsFor(type, seed),
   }
 }
 

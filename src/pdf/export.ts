@@ -13,6 +13,8 @@ import {
 } from './coordinates'
 import { stampDisplayRect } from './stamp'
 import { overlayPadPx, wrapTextToWidth } from './textLayout'
+import { arrowHeadPolygon, arrowHeadSize, isLinearOverlay, lineEndpoints, lineSketchRoughness, overlayDisplayPoint } from './shapeGeometry'
+import { sketchLineBetween, sketchStrokes } from './sketch'
 import { archOffset } from './wordArt'
 import {
   canFlattenScanEdits,
@@ -52,7 +54,7 @@ export async function exportPdf(
   document: EditorDocument,
   fontBytes?: Uint8Array,
 ): Promise<Uint8Array> {
-  const { PDFDocument, degrees, rgb } = await import('pdf-lib')
+  const { PDFDocument, degrees, rgb, LineCapStyle } = await import('pdf-lib')
   const sourceDocuments = new Map<string, PdfLibDocument>()
 
   for (const source of document.sources) {
@@ -215,7 +217,8 @@ export async function exportPdf(
           height: overlay.height * display.height, rotate: degrees(rotation), opacity: overlay.opacity })
       } else if (
         (overlay.type === 'ink' || overlay.sketch) &&
-        (overlay.points?.length ?? 0) > 1
+        (overlay.points?.length ?? 0) > 1 &&
+        !isLinearOverlay(overlay.type)
       ) {
         const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
         const sourcePoints = overlay.points ?? []
@@ -226,7 +229,8 @@ export async function exportPdf(
         for (let index = 1; index < points.length; index += 1) {
           if (sourcePoints[index]?.move) continue
           page.drawLine({ start: points[index - 1], end: points[index],
-            thickness: overlay.strokeWidth, color, opacity: overlay.opacity })
+            thickness: overlay.strokeWidth, color, opacity: overlay.opacity,
+            lineCap: LineCapStyle.Round })
         }
       } else if (overlay.type === 'text' && fonts) {
         if (overlay.cover) {
@@ -388,33 +392,69 @@ export async function exportPdf(
             opacity: overlay.opacity,
           })
         }
-      } else if (overlay.type === 'arrow') {
+      } else if (overlay.type === 'line' || overlay.type === 'arrow') {
         const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
-        const start = displayPointToPdf(
-          {
-            x: (overlay.x + 0.08 * overlay.width) * display.width,
-            y: (overlay.y + 0.82 * overlay.height) * display.height,
-          },
-          pageWidth,
-          pageHeight,
-          quarterTurn,
+        const [startLocal, endLocal] = lineEndpoints(overlay)
+        const startDisplay = overlayDisplayPoint(
+          overlay,
+          startLocal,
+          display.width,
+          display.height,
         )
-        const end = displayPointToPdf(
-          {
-            x: (overlay.x + 0.92 * overlay.width) * display.width,
-            y: (overlay.y + 0.18 * overlay.height) * display.height,
-          },
-          pageWidth,
-          pageHeight,
-          quarterTurn,
+        const endDisplay = overlayDisplayPoint(
+          overlay,
+          endLocal,
+          display.width,
+          display.height,
         )
-        page.drawLine({
-          start,
-          end,
-          thickness: overlay.strokeWidth,
-          color,
-          opacity: overlay.opacity,
-        })
+        const drawPdfLine = (
+          from: { x: number; y: number },
+          to: { x: number; y: number },
+        ) => {
+          page.drawLine({
+            start: displayPointToPdf(from, pageWidth, pageHeight, quarterTurn),
+            end: displayPointToPdf(to, pageWidth, pageHeight, quarterTurn),
+            thickness: overlay.strokeWidth,
+            color,
+            opacity: overlay.opacity,
+            lineCap: LineCapStyle.Round,
+          })
+        }
+        const head =
+          overlay.type === 'arrow'
+            ? arrowHeadPolygon(
+                startDisplay,
+                endDisplay,
+                arrowHeadSize(overlay.strokeWidth),
+              )
+            : null
+        const shaftEnd = head?.neck ?? endDisplay
+        if (overlay.sketch) {
+          const sketched = sketchLineBetween(
+            startDisplay,
+            shaftEnd,
+            overlay.sketchSeed ?? 1,
+            lineSketchRoughness(overlay.strokeWidth),
+          )
+          for (const stroke of sketchStrokes(sketched)) {
+            for (let index = 1; index < stroke.length; index += 1) {
+              const previous = stroke[index - 1]
+              const current = stroke[index]
+              if (previous && current) drawPdfLine(previous, current)
+            }
+          }
+        } else {
+          drawPdfLine(startDisplay, shaftEnd)
+        }
+        if (head) {
+          const left = displayPointToPdf(head.left, pageWidth, pageHeight, quarterTurn)
+          const tip = displayPointToPdf(head.tip, pageWidth, pageHeight, quarterTurn)
+          const right = displayPointToPdf(head.right, pageWidth, pageHeight, quarterTurn)
+          page.drawSvgPath(
+            `M ${left.x} ${left.y} L ${tip.x} ${tip.y} L ${right.x} ${right.y} Z`,
+            { color, opacity: overlay.opacity },
+          )
+        }
       } else {
         let lineOverlay: PageOverlay = overlay
         if (overlay.type === 'underline') {

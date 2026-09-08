@@ -116,7 +116,7 @@ async function ensureEnglishTessdata() {
   }
   mkdirSync(OCR_CACHE_DIR, { recursive: true })
   const response = await fetch(TESSDATA_BEST_URL, {
-    headers: { 'User-Agent': 'pdf-editor-ocr-build' },
+    headers: { 'User-Agent': 'pdfe-ocr-build' },
   })
   if (!response.ok) {
     throw new Error(
@@ -232,8 +232,8 @@ export default defineConfig({
       registerType: 'prompt',
       includeAssets: ['icon.svg'],
       manifest: {
-        name: 'PDF Editor',
-        short_name: 'PDF Editor',
+        name: 'pdfe',
+        short_name: 'pdfe',
         description: 'A private PDF workspace that runs entirely in your browser.',
         theme_color: '#101715',
         background_color: '#101715',

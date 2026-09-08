@@ -128,8 +128,9 @@ input:focus-visible,
 }
 
 .brand-copy strong {
-  font-size: 0.93rem;
-  letter-spacing: 0.01em;
+  font-size: 1.02rem;
+  letter-spacing: 0.14em;
+  font-weight: 800;
 }
 
 .brand-copy span {
@@ -842,6 +843,10 @@ input:focus-visible,
   cursor: crosshair;
 }
 
+.annotation-layer.is-interactive.tool-eraser {
+  cursor: crosshair;
+}
+
 .annotation {
   position: absolute;
   z-index: 1;
@@ -864,6 +869,20 @@ input:focus-visible,
 .annotation.is-selected {
   outline: 2px solid #168e80;
   outline-offset: 3px;
+}
+
+.annotation-layer.is-interactive.tool-select .annotation:hover:not(.is-selected):not(.annotation-extracted) {
+  outline: 1.5px solid rgba(22, 142, 128, 0.38);
+  outline-offset: 2px;
+}
+
+.annotation.annotation-rectangle,
+.annotation.annotation-ellipse,
+.annotation.annotation-diamond,
+.annotation.annotation-line,
+.annotation.annotation-arrow {
+  border-style: none;
+  background: transparent;
 }
 
 .annotation.is-editing {
@@ -956,6 +975,10 @@ input:focus-visible,
   display: block;
 }
 
+.annotation-highlight {
+  border-radius: 4px;
+}
+
 .annotation-underline {
   top: auto;
   border-bottom-style: solid;
@@ -971,8 +994,7 @@ input:focus-visible,
 
 .annotation-rectangle,
 .annotation-ellipse {
-  border-style: solid;
-  border-width: inherit;
+  border-style: none;
 }
 
 .annotation-ellipse {
@@ -983,6 +1005,26 @@ input:focus-visible,
   overflow: visible;
 }
 
+.annotation.is-linear {
+  overflow: visible;
+  min-height: 8px;
+}
+
+.annotation-layer.is-interactive.tool-select .annotation.is-linear {
+  pointer-events: none;
+  cursor: default;
+}
+
+.annotation-layer.is-interactive.tool-select .annotation.is-linear .annotation-linear-stroke {
+  pointer-events: auto;
+  cursor: move;
+}
+
+.annotation-layer.is-interactive.tool-select .annotation.is-linear .annotation-vertex-handle {
+  pointer-events: auto;
+  cursor: grab;
+}
+
 .annotation-sketch {
   overflow: visible;
   pointer-events: none;
@@ -991,15 +1033,74 @@ input:focus-visible,
 .annotation-resize-handle {
   position: absolute;
   z-index: 4;
-  right: -7px;
-  bottom: -7px;
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
   padding: 0;
   background: #f5fffc;
-  border: 2px solid #168e80;
-  border-radius: 50%;
+  border: 1.5px solid #168e80;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(16, 23, 21, 0.16);
+}
+
+.annotation-resize-handle.is-se,
+.annotation-resize-handle:not([class*="is-"]) {
+  right: -5px;
+  bottom: -5px;
   cursor: nwse-resize;
+}
+
+.annotation-resize-handle.is-nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+
+.annotation-resize-handle.is-ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+
+.annotation-resize-handle.is-sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+
+.annotation-vertex-handle {
+  position: absolute;
+  z-index: 5;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  background: #f5fffc;
+  border: 1.5px solid #168e80;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(16, 23, 21, 0.16);
+  cursor: grab;
+}
+
+.annotation-vertex-handle:active {
+  cursor: grabbing;
+}
+
+.annotation.is-linear.is-selected,
+.annotation-layer.is-interactive.tool-select .annotation.is-linear:hover {
+  outline: none;
+  box-shadow: none;
+}
+
+.annotation.is-draft {
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0.88;
+  outline: none;
+}
+
+.annotation.is-draft.annotation-text {
+  outline: 1px dashed rgba(17, 17, 17, 0.35);
+  background: rgba(255, 255, 255, 0.62);
 }
 
 .pdf-canvas-wrap .canvas-skeleton {
@@ -1493,7 +1594,15 @@ input:focus-visible,
   font-size: 0.86rem;
   line-height: 1.45;
 }
-.annotation-layer.is-interactive.tool-eraser .annotation-ink { pointer-events: auto; cursor: crosshair; }
+.annotation-layer.is-interactive.tool-eraser .annotation:not(.annotation-extracted),
+.annotation-layer.is-interactive.tool-eraser .annotation-extracted.is-edited {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.annotation-layer.is-interactive.tool-eraser .annotation.is-linear {
+  pointer-events: none;
+}
 .signature-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 24px; border: 1px solid #52665e; border-radius: 16px; color: #edf4f1; background: #151e1b; }
 .signature-dialog::backdrop { background: #0009; }
 .signature-dialog h2 { margin-top: 0; }

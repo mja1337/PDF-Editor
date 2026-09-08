@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultOverlay, createLineMark, hitExtractedLine } from '../src/domain/overlays'
+import { createDefaultOverlay, createDrawnOverlay, createLineMark, hitExtractedLine } from '../src/domain/overlays'
+import { lineEndpoints, overlayHitsPoint, pagePoint } from '../src/pdf/shapeGeometry'
 import { sketchArrowPoints, sketchRectPoints, sketchStrokes } from '../src/pdf/sketch'
 
 describe('new overlays', () => {
@@ -32,6 +33,53 @@ describe('new overlays', () => {
     }
   })
 
+  it('draws a line from the drag start to the drag end', () => {
+    const line = createDrawnOverlay('line', { x: 0.2, y: 0.4 }, { x: 0.8, y: 0.4 }, '#e05252')
+    expect(line.type).toBe('line')
+    expect(line.width).toBeGreaterThan(0.5)
+    expect(line.height).toBeLessThan(0.05)
+    const [start, end] = lineEndpoints(line)
+    const from = pagePoint(start, line)
+    const to = pagePoint(end, line)
+    expect(from.x).toBeCloseTo(0.2, 2)
+    expect(to.x).toBeCloseTo(0.8, 2)
+    expect(from.y).toBeCloseTo(0.4, 2)
+    expect(to.y).toBeCloseTo(0.4, 2)
+  })
+
+  it('places a horizontal line when clicked rather than a diagonal box', () => {
+    const line = createDefaultOverlay('line', 0.5, 0.4, '#e05252')
+    const [start, end] = lineEndpoints(line)
+    expect(Math.abs(start.y - end.y)).toBeLessThan(0.05)
+    expect(Math.abs(end.x - start.x)).toBeGreaterThan(0.7)
+  })
+
+  it('snaps dragged boxes to squares', () => {
+    const box = createDrawnOverlay(
+      'rectangle',
+      { x: 0.2, y: 0.2 },
+      { x: 0.5, y: 0.25 },
+      '#e05252',
+      { shift: true, pageAspect: 0.7 },
+    )
+    const visualWidth = box.width * 0.7
+    expect(Math.abs(visualWidth - box.height)).toBeLessThan(0.02)
+  })
+
+  it('snaps dragged lines to 45 degree increments', () => {
+    const line = createDrawnOverlay(
+      'line',
+      { x: 0.2, y: 0.2 },
+      { x: 0.5, y: 0.21 },
+      '#e05252',
+      { shift: true },
+    )
+    const [start, end] = lineEndpoints(line)
+    const from = pagePoint(start, line)
+    const to = pagePoint(end, line)
+    expect(Math.abs(to.y - from.y)).toBeLessThan(0.02)
+  })
+
   it('snaps a highlight to an extracted line', () => {
     const line = createDefaultOverlay('text', 0.2, 0.2, '#111111')
     line.extracted = true
@@ -44,5 +92,13 @@ describe('new overlays', () => {
     expect(mark.type).toBe('highlight')
     expect(mark.color).toBe('#f4d35e')
     expect(mark.width).toBeGreaterThanOrEqual(line.width)
+  })
+})
+
+describe('overlay hit testing', () => {
+  it('hits a horizontal line along the stroke, not the empty bounding box', () => {
+    const line = createDrawnOverlay('line', { x: 0.1, y: 0.5 }, { x: 0.9, y: 0.5 }, '#e05252')
+    expect(overlayHitsPoint(line, { x: 0.5, y: 0.5 }, 800, 1000)).toBe(true)
+    expect(overlayHitsPoint(line, { x: 0.5, y: 0.2 }, 800, 1000, 4)).toBe(false)
   })
 })

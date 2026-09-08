@@ -1,4 +1,4 @@
-# PDF Editor overhaul plan
+# pdfe overhaul plan
 
 ## Implementation checkpoint — 5 September 2026
 

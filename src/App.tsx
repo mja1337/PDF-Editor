@@ -1291,12 +1291,12 @@ export function App() {
       />
 
       <header className="topbar">
-        <div className="brand-lockup" aria-label="PDF Editor">
+        <div className="brand-lockup" aria-label="pdfe">
           <span className="brand-mark">
             <FileText size={19} strokeWidth={2.4} />
           </span>
           <span className="brand-copy">
-            <strong>PDF Editor</strong>
+            <strong>pdfe</strong>
             <span>Local workspace</span>
           </span>
         </div>
@@ -1958,24 +1958,24 @@ export function App() {
                   {annotationTool === 'ink'
                     ? 'Drag to draw. Each stroke can be undone separately.'
                     : annotationTool === 'eraser'
-                      ? 'Click a drawn stroke to remove it. Undo restores it.'
+                      ? 'Drag over strokes, shapes, or notes to remove them. Undo restores them.'
                       : annotationTool === 'highlight' ||
                           annotationTool === 'underline' ||
                           annotationTool === 'strikeout'
                         ? selectedPage?.overlays.some((overlay) => overlay.extracted)
-                          ? 'Click an analysed line to mark that text. Empty space still places a free box.'
-                          : 'Click the page to place a box, or analyse text first to mark whole lines.'
+                          ? 'Click an analysed line to mark that text. Drag on empty space to size a free mark. Hold Shift for a square.'
+                          : 'Drag to size a mark, or analyse text first to mark whole lines.'
                         : annotationTool === 'wordArt'
-                          ? 'Click to place stylised Arial Black text. Drag to move; double-click to edit.'
+                          ? 'Click to place stylised Arial Black text, or drag to size the box.'
                           : annotationTool === 'text'
-                            ? 'Click to place Arial Black text. Drag to move it; double-click to edit.'
-                            : annotationTool === 'rectangle' ||
-                                annotationTool === 'ellipse' ||
-                                annotationTool === 'line' ||
-                                annotationTool === 'arrow' ||
-                                annotationTool === 'diamond'
-                              ? 'Click to place a sketchy shape, Excalidraw-style. Select it to switch to a clean stroke.'
-                              : 'Click the page to place the annotation.'}
+                            ? 'Click to place Arial Black text, or drag to size the box. Double-click a note to edit.'
+                            : annotationTool === 'line' || annotationTool === 'arrow'
+                              ? 'Drag from one point to another. Hold Shift to snap to 45°. Press Escape to cancel. Endpoints stay editable after you place it.'
+                              : annotationTool === 'rectangle' ||
+                                  annotationTool === 'ellipse' ||
+                                  annotationTool === 'diamond'
+                                ? 'Drag to draw. Hold Shift for a square or circle. Press Escape to cancel. Select a shape to switch between sketchy and clean.'
+                                : 'Click the page to place the annotation.'}
                 </p>
               )}
             </section>
