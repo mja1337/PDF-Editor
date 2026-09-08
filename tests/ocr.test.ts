@@ -82,7 +82,7 @@ describe('OCR replacement type', () => {
   it('cleans spacing and fits a line size to the scanned box width', () => {
     expect(cleanupOcrText('  Total ,  $12 ')).toBe('Total, $12')
     expect(fittedOcrFontSize('Hello', 100, 20, 2, (px, text) => text.length * px * 0.5)).toBeCloseTo(
-      9,
+      7.6,
     )
   })
 

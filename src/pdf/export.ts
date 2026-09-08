@@ -14,6 +14,13 @@ import {
 import { stampDisplayRect } from './stamp'
 import { overlayPadPx, wrapTextToWidth } from './textLayout'
 import { archOffset } from './wordArt'
+import {
+  canFlattenScanEdits,
+  coverBox,
+  flattenScannedPageEdits,
+  isScannedTextEdit,
+  pageHasScannedEdits,
+} from './scanEdit'
 
 function copyMetadata(source: PdfLibDocument, output: PdfLibDocument) {
   const title = source.getTitle()
@@ -58,10 +65,16 @@ export async function exportPdf(
   }
 
   const output = await PDFDocument.create()
+  const flattenable = canFlattenScanEdits()
   const textOverlays = document.pages.flatMap((page) =>
-    page.overlays.filter(
-      (overlay) => overlay.type === 'text' && (!overlay.extracted || overlay.edited),
-    ),
+    page.overlays.filter((overlay) => {
+      if (overlay.type !== 'text') return false
+      if (!overlay.extracted || overlay.edited) {
+        if (flattenable && isScannedTextEdit(overlay)) return false
+        return true
+      }
+      return false
+    }),
   )
   const needsFont = Boolean(document.watermark) || textOverlays.length > 0
   const fonts = needsFont
@@ -86,6 +99,42 @@ export async function exportPdf(
     const sourceRotation = page.getRotation().angle
     const rotation = (sourceRotation + pageReference.rotationDelta + 360) % 360
     page.setRotation(degrees(rotation))
+
+    let burnedScanEdits = false
+    const pageBytes = sourceBytes.get(pageReference.sourceDocumentId)
+    if (flattenable && pageBytes && pageHasScannedEdits(pageReference.overlays)) {
+      try {
+        const jpegBytes = await flattenScannedPageEdits(
+          pageBytes,
+          pageReference.sourcePageIndex,
+          pageReference.rotationDelta,
+          pageReference.overlays,
+        )
+        if (jpegBytes) {
+          const jpeg = await output.embedJpg(jpegBytes)
+          const pageWidth = page.getWidth()
+          const pageHeight = page.getHeight()
+          const quarterTurn = rotation as QuarterTurn
+          const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+          const anchor = displayPointToPdf(
+            { x: 0, y: display.height },
+            pageWidth,
+            pageHeight,
+            quarterTurn,
+          )
+          page.drawImage(jpeg, {
+            ...anchor,
+            width: display.width,
+            height: display.height,
+            rotate: degrees(rotation),
+          })
+          burnedScanEdits = true
+        }
+      } catch {
+        burnedScanEdits = false
+      }
+    }
+
     if (document.watermark && fonts) {
       const size = Math.max(18, Math.min(page.getWidth(), page.getHeight()) * 0.08)
       const textWidth = fonts.defaultFont.widthOfTextAtSize(
@@ -135,13 +184,15 @@ export async function exportPdf(
 
 
     for (const overlay of pageReference.overlays) {
+      if (burnedScanEdits && isScannedTextEdit(overlay)) continue
       const [red, green, blue] = colorComponents(overlay.color)
       const color = rgb(red, green, blue)
       const pageWidth = page.getWidth()
       const pageHeight = page.getHeight()
       const quarterTurn = rotation as QuarterTurn
+      const covered = overlay.type === 'text' && overlay.extracted && overlay.edited
       const rect = overlayToPdfRect(
-        overlay,
+        covered ? { ...overlay, ...coverBox(overlay) } : overlay,
         pageWidth,
         pageHeight,
         quarterTurn,
@@ -167,11 +218,13 @@ export async function exportPdf(
         (overlay.points?.length ?? 0) > 1
       ) {
         const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
-        const points = (overlay.points ?? []).map((point) => displayPointToPdf({
+        const sourcePoints = overlay.points ?? []
+        const points = sourcePoints.map((point) => displayPointToPdf({
           x: (overlay.x + point.x * overlay.width) * display.width,
           y: (overlay.y + point.y * overlay.height) * display.height,
         }, pageWidth, pageHeight, quarterTurn))
         for (let index = 1; index < points.length; index += 1) {
+          if (sourcePoints[index]?.move) continue
           page.drawLine({ start: points[index - 1], end: points[index],
             thickness: overlay.strokeWidth, color, opacity: overlay.opacity })
         }
@@ -191,26 +244,29 @@ export async function exportPdf(
         const text = overlay.text || 'Add text'
         let fontSize = overlay.fontSize ?? 18
         const pad = overlayPadPx(overlay, 1)
-        const maxWidth = Math.max(1, overlay.width * display.width - pad.x * 2)
+        const box = overlay.extracted && overlay.edited ? coverBox(overlay) : overlay
+        const maxWidth = Math.max(1, box.width * display.width - pad.x * 2)
+        const keepSingleLine = Boolean(overlay.extracted)
         const lineHeight = fontSize * (overlay.extracted ? 1 : 1.15)
         let lines: string[]
-        if (overlay.extracted || text.includes('\n')) {
+        if (!keepSingleLine && text.includes('\n')) {
           lines = wrapTextToWidth(
             text,
             maxWidth,
             (value) => font.widthOfTextAtSize(value, fontSize),
           )
         } else {
-          while (fontSize > 5 && font.widthOfTextAtSize(text, fontSize) > maxWidth) {
+          const line = keepSingleLine ? text.replace(/\s+/g, ' ').trim() : text
+          while (fontSize > 5 && font.widthOfTextAtSize(line, fontSize) > maxWidth) {
             fontSize -= 0.25
           }
-          lines = [text]
+          lines = [line]
         }
         for (let index = 0; index < lines.length; index += 1) {
           const line = lines[index]
           if (!line) continue
-          const baseX = overlay.x * display.width + pad.x
-          const baseY = overlay.y * display.height + pad.y + fontSize + index * lineHeight
+          const baseX = box.x * display.width + pad.x
+          const baseY = box.y * display.height + pad.y + fontSize + index * lineHeight
           const drawAt = (textX: number, textY: number, fill = color, size = fontSize) => {
             const anchor = displayPointToPdf(
               { x: textX, y: textY },

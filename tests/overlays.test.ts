@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDefaultOverlay, createLineMark, hitExtractedLine } from '../src/domain/overlays'
-import { sketchArrowPoints, sketchRectPoints } from '../src/pdf/sketch'
+import { sketchArrowPoints, sketchRectPoints, sketchStrokes } from '../src/pdf/sketch'
 
 describe('new overlays', () => {
   it('creates Arial Black text instead of red bold type', () => {
@@ -19,8 +19,17 @@ describe('new overlays', () => {
     const box = createDefaultOverlay('rectangle', 0.5, 0.5, '#e05252')
     expect(box.sketch).toBe(true)
     expect(box.points?.length).toBeGreaterThan(6)
-    expect(sketchRectPoints(3).length).toBeGreaterThan(6)
-    expect(sketchArrowPoints(4).length).toBeGreaterThan(4)
+    expect(sketchStrokes(sketchRectPoints(3))).toHaveLength(4)
+    expect(sketchStrokes(sketchArrowPoints(4)).length).toBeGreaterThanOrEqual(3)
+    const [top, right] = sketchStrokes(sketchRectPoints(11))
+    const topEnd = top?.at(-1)
+    const rightStart = right?.[0]
+    expect(topEnd && rightStart).toBeTruthy()
+    if (topEnd && rightStart) {
+      const gap = Math.hypot(topEnd.x - rightStart.x, topEnd.y - rightStart.y)
+      expect(gap).toBeGreaterThan(0.002)
+      expect(gap).toBeLessThan(0.08)
+    }
   })
 
   it('snaps a highlight to an extracted line', () => {

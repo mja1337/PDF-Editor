@@ -80,7 +80,7 @@ describe('text layout', () => {
     expect(caretIndexAtX('Hello', 48, measure)).toBe(5)
   })
 
-  it('wraps long replacements instead of shrinking the original size', () => {
+  it('keeps extracted replacements inside the original line box', () => {
     expect(wrapTextToWidth('one two three', 75, measure)).toEqual([
       'one two',
       'three',
@@ -95,8 +95,8 @@ describe('text layout', () => {
       1,
       measure,
     )
-    expect(grown.width).toBeGreaterThan(0.2)
-    expect(grown.width).toBeLessThanOrEqual(0.9)
+    expect(grown.width).toBeCloseTo(0.2)
+    expect(grown.height).toBeCloseTo(0.04)
 
     const wrapped = fitOverlayToText(
       { x: 0.1, y: 0.2, width: 0.2, height: 0.03, fontSize: 12, extracted: true },
@@ -106,9 +106,18 @@ describe('text layout', () => {
       1,
       measure,
     )
-    expect(wrapped.width).toBeGreaterThan(0.8)
-    expect(wrapped.width).toBeLessThanOrEqual(0.9)
-    expect(wrapped.height).toBeGreaterThan(0.04)
+    expect(wrapped.width).toBeCloseTo(0.2)
+    expect(wrapped.height).toBeCloseTo(0.03)
+
+    const note = fitOverlayToText(
+      { x: 0.1, y: 0.2, width: 0.2, height: 0.04, fontSize: 12 },
+      'This new note can grow',
+      1000,
+      1400,
+      1,
+      measure,
+    )
+    expect(note.width).toBeGreaterThan(0.2)
   })
 
   it('keeps the original box when the replacement is shorter', () => {

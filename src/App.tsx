@@ -2018,8 +2018,10 @@ export function App() {
                 {selectedOverlay.extracted && (
                   <p className="tool-hint">
                     {selectedOverlay.edited
-                      ? 'Export covers the original line with a white box and draws this replacement. The original PDF text remains in the file.'
-                      : 'Click the line on the page and type. Export covers the original visually; the source glyphs stay in the file.'}
+                      ? selectedOverlay.scanned
+                        ? 'Export paints this change onto the scan so it stays in the original box, with the same paper and ink. The replacement is flattened into the page image.'
+                        : 'Export covers the original line and draws this replacement. The original PDF text remains in the file.'
+                      : 'Click the line on the page and type. Keep replacements short enough to sit in the original line.'}
                   </p>
                 )}
                 <label className="color-control">

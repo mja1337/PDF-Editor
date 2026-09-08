@@ -42,11 +42,12 @@ export interface PageOverlay {
   wordArt?: WordArtStyle
   sketch?: boolean
   sketchSeed?: number
-  points?: Array<{ x: number; y: number }>
+  points?: Array<{ x: number; y: number; move?: boolean }>
   imageData?: string
   signature?: boolean
   extracted?: boolean
   edited?: boolean
+  scanned?: boolean
   cover?: boolean
   backgroundColor?: string
 }

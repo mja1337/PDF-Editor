@@ -96,15 +96,12 @@ export function fittedOcrFontSize(
   measure?: (fontPx: number, sample: string) => number,
 ) {
   const scale = Math.max(0.1, renderScale)
-  const fallback = (boxHeightPx * 0.76) / scale
-  if (!text || boxWidthPx < 4 || boxHeightPx < 4) return fallback
-  if (!measure) return fallback
+  const byHeight = (boxHeightPx * 0.76) / scale
+  if (!text || boxWidthPx < 4 || boxHeightPx < 4 || !measure) return byHeight
   const unit = measure(12, text) / 12
-  if (!(unit > 0)) return fallback
-  const byWidth = (boxWidthPx * 0.97) / unit
-  const maxByHeight = boxHeightPx * 0.9
-  const minByHeight = boxHeightPx * 0.52
-  return Math.max(minByHeight, Math.min(maxByHeight, byWidth)) / scale
+  if (!(unit > 0)) return byHeight
+  const byWidth = (boxWidthPx * 0.98) / unit / scale
+  return Math.max(byHeight * 0.78, Math.min(byHeight, byWidth))
 }
 
 export function guessOcrFace(

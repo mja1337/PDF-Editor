@@ -899,13 +899,18 @@ input:focus-visible,
 }
 
 .annotation-extracted.is-edited {
-  overflow: visible;
+  overflow: hidden;
 }
 
 .annotation-extracted.is-edited .annotation-text {
-  overflow: visible;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.annotation-extracted.annotation-scanned.is-edited .annotation-text,
+.annotation-extracted.annotation-scanned.is-editing .annotation-text-editor {
+  filter: blur(0.32px);
+  letter-spacing: 0.012em;
 }
 
 .annotation-text-editor {
@@ -965,6 +970,11 @@ input:focus-visible,
 
 .annotation-line {
   overflow: visible;
+}
+
+.annotation-sketch {
+  overflow: visible;
+  pointer-events: none;
 }
 
 .annotation-resize-handle {
@@ -1403,10 +1413,6 @@ input:focus-visible,
   position: absolute;
   inset: 0.12em 0 0 0.12em;
   color: rgba(17, 17, 17, 0.4);
-}
-
-.annotation-sketch {
-  overflow: visible;
 }
 
 .settings-dialog {

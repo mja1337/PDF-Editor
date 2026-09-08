@@ -10,6 +10,7 @@ import {
 } from '../domain/overlays'
 import { cssFontFamily } from '../pdf/fontMatch'
 import { sampleOverlayPixels, type SampledAppearance } from '../pdf/pageSample'
+import { sketchStrokes } from '../pdf/sketch'
 import {
   caretIndexAtX,
   createCanvasMeasurer,
@@ -70,11 +71,14 @@ function overlayStyle(
   const covering = Boolean(
     overlay.extracted && (overlay.edited || overlay.cover || editing),
   )
+  const scanned = Boolean(overlay.extracted && overlay.scanned)
   const weight = overlay.fontWeight ?? (overlay.extracted ? 400 : 900)
   const color = appearance?.color ?? overlay.color
   const background = appearance?.backgroundColor ?? overlay.backgroundColor ?? '#ffffff'
   const pad = overlayPadPx(overlay, renderScale)
-  const bleed = covering ? overlayFontPx(overlay, renderScale) * 0.12 : 0
+  const bleed = covering
+    ? overlayFontPx(overlay, renderScale) * (scanned ? 0.45 : 0.18)
+    : 0
   return {
     left: `${overlay.x * 100}%`,
     top: `${overlay.y * 100}%`,
@@ -90,8 +94,11 @@ function overlayStyle(
     fontStyle: overlay.fontItalic ? 'italic' : 'normal',
     lineHeight: overlay.extracted ? 1 : 1.15,
     backgroundColor: covering ? background : undefined,
-    boxShadow: covering ? `0 0 0 ${bleed}px ${background}` : undefined,
+    boxShadow: covering
+      ? `0 0 0 ${bleed}px ${background}, 0 0 ${bleed * 0.6}px ${background}`
+      : undefined,
     boxSizing: 'border-box',
+    overflow: scanned && covering ? 'hidden' : undefined,
     paddingTop: overlay.extracted ? `${pad.y}px` : undefined,
     paddingBottom: overlay.extracted ? `${pad.y}px` : undefined,
     paddingLeft: overlay.extracted ? `${pad.x}px` : undefined,
@@ -114,32 +121,24 @@ function commitText(overlay: PageOverlay, value: string) {
 }
 
 function SketchPath({ overlay, renderScale }: { overlay: PageOverlay; renderScale: number }) {
-  const points = overlay.points ?? []
-  if (points.length < 2) return null
-  const joined = points.map((point) => `${point.x},${point.y}`).join(' ')
-  const closed =
-    overlay.type === 'rectangle' || overlay.type === 'ellipse' || overlay.type === 'diamond'
+  const strokes = sketchStrokes(overlay.points ?? [])
+  if (strokes.every((stroke) => stroke.length < 2)) return null
+  const strokeWidth = overlay.strokeWidth * renderScale
   return (
     <svg className="annotation-line annotation-sketch" viewBox="0 0 1 1" preserveAspectRatio="none">
-      {closed ? (
-        <polygon
-          points={joined}
-          fill="none"
-          stroke={overlay.color}
-          strokeWidth={overlay.strokeWidth * renderScale}
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-      ) : (
-        <polyline
-          points={joined}
-          fill="none"
-          stroke={overlay.color}
-          strokeWidth={overlay.strokeWidth * renderScale}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
+      {strokes.map((stroke, index) =>
+        stroke.length < 2 ? null : (
+          <polyline
+            key={index}
+            points={stroke.map((point) => `${point.x},${point.y}`).join(' ')}
+            fill="none"
+            stroke={overlay.color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ),
       )}
     </svg>
   )
@@ -640,7 +639,7 @@ export function AnnotationLayer({
           <div
             key={overlay.id}
             data-overlay-id={overlay.id}
-            className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''}`}
+            className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''}`}
             style={overlayStyle(sized, renderScale, editing, editing ? editAppearance : null)}
             role={interactive && !editing ? 'button' : undefined}
             tabIndex={interactive && !editing ? 0 : undefined}

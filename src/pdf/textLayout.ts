@@ -93,8 +93,11 @@ export function fitOverlayToText(
   renderScale: number,
   measure: MeasureText,
 ) {
+  if (overlay.extracted) {
+    return { width: overlay.width, height: overlay.height }
+  }
   const fontPx = overlayFontPx(overlay, renderScale)
-  const lineHeightPx = fontPx * (overlay.extracted ? 1 : 1.15)
+  const lineHeightPx = fontPx * 1.15
   const pad = overlayPadPx(overlay, renderScale)
   const minWidthPx = overlay.width * pageWidth
   const maxWidthPx = Math.max(minWidthPx, (1 - overlay.x) * pageWidth - 2)

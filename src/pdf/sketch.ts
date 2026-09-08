@@ -1,6 +1,7 @@
 export interface SketchPoint {
   x: number
   y: number
+  move?: boolean
 }
 
 function rng(seed: number) {
@@ -15,6 +16,21 @@ function jitter(next: () => number, amount: number) {
   return (next() - 0.5) * amount
 }
 
+function along(start: SketchPoint, end: SketchPoint, amount: number): SketchPoint {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const length = Math.hypot(dx, dy) || 1
+  return {
+    x: end.x + (dx / length) * amount,
+    y: end.y + (dy / length) * amount,
+  }
+}
+
+function slip(next: () => number) {
+  const magnitude = 0.006 + next() * 0.01
+  return next() < 0.42 ? -magnitude : magnitude
+}
+
 function wobbleSegment(
   start: SketchPoint,
   end: SketchPoint,
@@ -24,8 +40,8 @@ function wobbleSegment(
   const dx = end.x - start.x
   const dy = end.y - start.y
   const length = Math.hypot(dx, dy) || 1
-  const midCount = length > 0.45 ? 2 : 1
-  const points: SketchPoint[] = [start]
+  const midCount = length > 0.55 ? 2 : 1
+  const points: SketchPoint[] = [{ x: start.x, y: start.y }]
   for (let index = 1; index <= midCount; index += 1) {
     const t = index / (midCount + 1)
     const nx = -dy / length
@@ -35,75 +51,106 @@ function wobbleSegment(
       y: start.y + dy * t + ny * jitter(next, roughness),
     })
   }
-  points.push(end)
+  points.push({ x: end.x, y: end.y })
   return points
 }
 
-function wobbleLoop(corners: SketchPoint[], seed: number, roughness: number) {
-  const next = rng(seed)
+function joinStrokes(strokes: SketchPoint[][]): SketchPoint[] {
   const points: SketchPoint[] = []
-  for (let index = 0; index < corners.length; index += 1) {
-    const start = corners[index]
-    const end = corners[(index + 1) % corners.length]
-    const segment = wobbleSegment(start, end, next, roughness)
-    if (index > 0) segment.shift()
-    points.push(...segment)
+  for (let index = 0; index < strokes.length; index += 1) {
+    const stroke = strokes[index]
+    if (!stroke || stroke.length === 0) continue
+    for (let offset = 0; offset < stroke.length; offset += 1) {
+      const point = stroke[offset]
+      if (!point) continue
+      points.push(index > 0 && offset === 0 ? { ...point, move: true } : { x: point.x, y: point.y })
+    }
   }
   return points
 }
 
+export function sketchStrokes(points: SketchPoint[]): SketchPoint[][] {
+  const strokes: SketchPoint[][] = []
+  let current: SketchPoint[] = []
+  for (const point of points) {
+    if (point.move && current.length > 0) {
+      strokes.push(current)
+      current = []
+    }
+    current.push({ x: point.x, y: point.y })
+  }
+  if (current.length > 0) strokes.push(current)
+  return strokes
+}
+
+function sketchEdges(corners: SketchPoint[], seed: number, roughness: number) {
+  const next = rng(seed)
+  return joinStrokes(
+    corners.map((start, index) => {
+      const end = corners[(index + 1) % corners.length]
+      if (!end) return []
+      const from = along(end, start, slip(next))
+      const to = along(start, end, slip(next))
+      return wobbleSegment(from, to, next, roughness)
+    }),
+  )
+}
+
 export function sketchRectPoints(seed: number): SketchPoint[] {
-  return wobbleLoop(
+  return sketchEdges(
     [
-      { x: 0.05, y: 0.05 },
-      { x: 0.95, y: 0.06 },
-      { x: 0.94, y: 0.95 },
-      { x: 0.06, y: 0.94 },
+      { x: 0.03, y: 0.03 },
+      { x: 0.97, y: 0.03 },
+      { x: 0.97, y: 0.97 },
+      { x: 0.03, y: 0.97 },
     ],
     seed,
-    0.045,
+    0.012,
   )
 }
 
 export function sketchDiamondPoints(seed: number): SketchPoint[] {
-  return wobbleLoop(
+  return sketchEdges(
     [
-      { x: 0.5, y: 0.04 },
-      { x: 0.96, y: 0.5 },
-      { x: 0.5, y: 0.96 },
-      { x: 0.04, y: 0.5 },
+      { x: 0.5, y: 0.03 },
+      { x: 0.97, y: 0.5 },
+      { x: 0.5, y: 0.97 },
+      { x: 0.03, y: 0.5 },
     ],
     seed,
-    0.04,
+    0.012,
   )
 }
 
 export function sketchEllipsePoints(seed: number): SketchPoint[] {
   const next = rng(seed)
+  const steps = 22
   const points: SketchPoint[] = []
-  const steps = 18
-  for (let index = 0; index < steps; index += 1) {
-    const angle = (Math.PI * 2 * index) / steps
+  const extra = 0.04 + next() * 0.05
+  const count = steps + (next() < 0.5 ? 1 : 0)
+  for (let index = 0; index <= count; index += 1) {
+    const angle = Math.PI * 2 * (index / steps) - extra * (index === 0 ? 1 : 0)
+    const radius = 0.455 + jitter(next, 0.016)
     points.push({
-      x: 0.5 + Math.cos(angle) * (0.44 + jitter(next, 0.05)),
-      y: 0.5 + Math.sin(angle) * (0.44 + jitter(next, 0.05)),
+      x: 0.5 + Math.cos(angle) * radius,
+      y: 0.5 + Math.sin(angle) * radius,
     })
   }
-  points.push(points[0])
   return points
 }
 
 export function sketchLinePoints(seed: number): SketchPoint[] {
   const next = rng(seed)
   return wobbleSegment(
-    { x: 0.08 + jitter(next, 0.03), y: 0.82 + jitter(next, 0.03) },
-    { x: 0.92 + jitter(next, 0.03), y: 0.18 + jitter(next, 0.03) },
+    { x: 0.04 + jitter(next, 0.012), y: 0.86 + jitter(next, 0.012) },
+    { x: 0.96 + jitter(next, 0.012), y: 0.14 + jitter(next, 0.012) },
     next,
-    0.05,
+    0.014,
   )
 }
 
 export function sketchArrowPoints(seed: number): SketchPoint[] {
+  const next = rng(seed)
   const shaft = sketchLinePoints(seed)
   const tip = shaft.at(-1) ?? { x: 0.9, y: 0.2 }
   const previous = shaft.at(-2) ?? { x: 0.7, y: 0.4 }
@@ -112,16 +159,21 @@ export function sketchArrowPoints(seed: number): SketchPoint[] {
   const length = Math.hypot(dx, dy) || 1
   const ux = dx / length
   const uy = dy / length
-  const head = 0.16
+  const head = 0.11 + next() * 0.025
+  const spread = 0.42 + next() * 0.08
   const left = {
-    x: tip.x - ux * head + -uy * head * 0.55,
-    y: tip.y - uy * head + ux * head * 0.55,
+    x: tip.x - ux * head + -uy * head * spread,
+    y: tip.y - uy * head + ux * head * spread,
   }
   const right = {
-    x: tip.x - ux * head - -uy * head * 0.55,
-    y: tip.y - uy * head - ux * head * 0.55,
+    x: tip.x - ux * head - -uy * head * spread,
+    y: tip.y - uy * head - ux * head * spread,
   }
-  return [...shaft, left, tip, right]
+  const neck = {
+    x: tip.x - ux * head * 0.18,
+    y: tip.y - uy * head * 0.18,
+  }
+  return joinStrokes([shaft, [left, neck, tip], [right, neck, tip]])
 }
 
 export function sketchPointsFor(

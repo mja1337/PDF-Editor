@@ -207,7 +207,10 @@ export async function analyseEditorDocument(
       pageText: extracted.pageText,
     })
     for (const run of extracted.runs) {
-      overlays.push({ pageId: reference.id, overlay: createExtractedOverlay(run) })
+      overlays.push({
+        pageId: reference.id,
+        overlay: createExtractedOverlay({ ...run, scanned: extracted.ocr }),
+      })
     }
     onProgress?.(position + 1, document.pages.length)
     await new Promise<void>((resolve) => {

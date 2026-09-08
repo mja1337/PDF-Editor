@@ -43,7 +43,7 @@ export function createDefaultOverlay(
     height: size.height,
     color: type === 'highlight' ? '#f4d35e' : isText ? '#111111' : color,
     opacity: type === 'highlight' ? 0.42 : 0.95,
-    strokeWidth: sketch ? 1.5 : 2,
+    strokeWidth: sketch ? 1.25 : 2,
     text: isText ? 'Add text' : undefined,
     fontSize: isText ? (options?.wordArt && options.wordArt !== 'plain' ? 28 : 22) : undefined,
     fontRole: isText ? 'sans' : undefined,
@@ -73,6 +73,7 @@ export function createExtractedOverlay(run: {
   fontItalic?: boolean
   color?: string
   backgroundColor?: string
+  scanned?: boolean
 }): PageOverlay {
   return normalizeOverlay({
     id: crypto.randomUUID(),
@@ -91,6 +92,7 @@ export function createExtractedOverlay(run: {
     fontItalic: run.fontItalic ?? false,
     extracted: true,
     edited: false,
+    scanned: Boolean(run.scanned),
     cover: false,
     backgroundColor: run.backgroundColor ?? '#ffffff',
   })
