@@ -189,14 +189,14 @@ test('renders page text and analyses it into editable lines', async ({ page }) =
 
   await page.getByRole('button', { name: 'extracted text annotation' }).first().click()
   await expect(page.getByRole('textbox', { name: 'Edit page text' })).toBeFocused()
-  const beforeGrow = await page.locator('.annotation-extracted.is-editing').boundingBox()
+  const beforeEdit = await page.locator('.annotation-extracted.is-editing').boundingBox()
   await page.getByRole('textbox', { name: 'Edit page text' }).fill(
-    'A much longer replacement that should grow the original line box',
+    'A much longer replacement that should stay in the original line box',
   )
   await page.getByRole('textbox', { name: 'Edit page text' }).press('Enter')
   await expect(page.getByRole('button', { name: /Edited · A much longer replacement/i })).toBeVisible()
-  const afterGrow = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
-  expect(afterGrow?.width ?? 0).toBeGreaterThan((beforeGrow?.width ?? 0) + 8)
+  const afterEdit = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
+  expect(Math.abs((afterEdit?.width ?? 0) - (beforeEdit?.width ?? 0))).toBeLessThan(8)
 
   const lineBox = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
   await page.getByRole('button', { name: 'Highlight', exact: true }).click()
