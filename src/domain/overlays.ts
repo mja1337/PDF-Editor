@@ -21,6 +21,22 @@ const SKETCH_TYPES = new Set<OverlayType>([
   'diamond',
 ])
 
+export type OverlayDrawOptions = {
+  wordArt?: WordArtStyle
+  id?: string
+  sketchSeed?: number
+  strokeWidth?: number
+  fill?: boolean
+}
+
+export function isClosedDrawShape(type: OverlayType) {
+  return type === 'rectangle' || type === 'ellipse' || type === 'diamond'
+}
+
+export function closedShapeFill(overlay: PageOverlay) {
+  return isClosedDrawShape(overlay.type) ? overlay.backgroundColor : undefined
+}
+
 function sketchSeed() {
   return Math.floor(Math.random() * 1_000_000)
 }
@@ -34,7 +50,7 @@ export function createDefaultOverlay(
   x: number,
   y: number,
   color: string,
-  options?: { wordArt?: WordArtStyle; id?: string; sketchSeed?: number },
+  options?: OverlayDrawOptions,
 ): PageOverlay {
   const sizes: Record<OverlayType, { width: number; height: number }> = {
     text: { width: 0.38, height: 0.09 },
@@ -53,6 +69,7 @@ export function createDefaultOverlay(
   const sketch = SKETCH_TYPES.has(type)
   const seed = sketch ? (options?.sketchSeed ?? sketchSeed()) : options?.sketchSeed
   const isText = type === 'text'
+  const fill = options?.fill && isClosedDrawShape(type) ? color : undefined
   return normalizeOverlay({
     id: options?.id ?? crypto.randomUUID(),
     type,
@@ -60,9 +77,10 @@ export function createDefaultOverlay(
     y: y - size.height / 2,
     width: size.width,
     height: size.height,
-    color: type === 'highlight' ? '#f4d35e' : isText ? '#111111' : color,
+    color: isText ? '#111111' : color,
     opacity: type === 'highlight' ? 0.42 : 0.95,
-    strokeWidth: sketch ? 1.25 : 2,
+    strokeWidth: options?.strokeWidth ?? (sketch ? 1.25 : 2),
+    backgroundColor: fill,
     text: isText ? 'Add text' : undefined,
     fontSize: isText ? (options?.wordArt && options.wordArt !== 'plain' ? 28 : 22) : undefined,
     fontRole: isText ? 'sans' : undefined,
@@ -147,12 +165,9 @@ export function createDrawnOverlay(
   start: PagePoint,
   end: PagePoint,
   color: string,
-  options?: {
-    wordArt?: WordArtStyle
+  options?: OverlayDrawOptions & {
     shift?: boolean
     pageAspect?: number
-    id?: string
-    sketchSeed?: number
   },
 ): PageOverlay {
   const from = clampPoint(start)
@@ -214,6 +229,7 @@ export function createLineMark(
   type: 'highlight' | 'underline' | 'strikeout',
   line: PageOverlay,
   color: string,
+  strokeWidth = 2,
 ): PageOverlay {
   const pad = type === 'highlight' ? 0.004 : 0
   return normalizeOverlay({
@@ -223,9 +239,9 @@ export function createLineMark(
     y: Math.max(0, line.y - pad),
     width: Math.min(1, line.width + pad * 2),
     height: Math.min(1, line.height + pad * 2),
-    color: type === 'highlight' ? '#f4d35e' : color,
+    color,
     opacity: type === 'highlight' ? 0.42 : 0.95,
-    strokeWidth: type === 'highlight' ? 1 : 2,
+    strokeWidth: type === 'highlight' ? 1 : strokeWidth,
   })
 }
 

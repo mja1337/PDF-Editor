@@ -8,6 +8,7 @@ import {
   createInkOverlay,
   createLineMark,
   hitExtractedLine,
+  isClosedDrawShape,
   matchingLineMark,
   nextSketchSeed,
   pageEndpoints,
@@ -52,6 +53,7 @@ interface AnnotationLayerProps {
   tool?: AnnotationTool
   color?: string
   strokeWidth?: number
+  fill?: boolean
   onErase?: (overlayId: string) => void
   selectedOverlayId?: string | null
   onCreate?: (overlay: PageOverlay) => void
@@ -291,44 +293,59 @@ function SketchPath({ overlay, renderScale }: { overlay: PageOverlay; renderScal
 }
 
 function ClosedShape({ overlay, renderScale }: { overlay: PageOverlay; renderScale: number }) {
-  if (overlay.sketch && overlay.points && overlay.points.length > 1) {
-    return <SketchPath overlay={overlay} renderScale={renderScale} />
-  }
   const stroke = Math.max(1, overlay.strokeWidth * renderScale)
   const inset = 0.045
+  const fill = overlay.backgroundColor
+  const sketch = Boolean(overlay.sketch && overlay.points && overlay.points.length > 1)
+  const strokes = sketch ? sketchStrokes(overlay.points ?? []) : []
+  const showBody = Boolean(fill) || !sketch
   return (
     <svg className="annotation-line annotation-closed-shape" viewBox="0 0 1 1" preserveAspectRatio="none">
-      {overlay.type === 'ellipse' ? (
+      {showBody && overlay.type === 'ellipse' ? (
         <ellipse
           cx="0.5"
           cy="0.5"
           rx={0.5 - inset}
           ry={0.5 - inset}
-          fill="transparent"
-          stroke={overlay.color}
-          strokeWidth={stroke}
+          fill={fill ?? 'none'}
+          stroke={sketch ? 'none' : overlay.color}
+          strokeWidth={sketch ? 0 : stroke}
           vectorEffect="non-scaling-stroke"
         />
-      ) : overlay.type === 'diamond' ? (
+      ) : showBody && overlay.type === 'diamond' ? (
         <polygon
           points="0.5,0.04 0.96,0.5 0.5,0.96 0.04,0.5"
-          fill="transparent"
-          stroke={overlay.color}
-          strokeWidth={stroke}
+          fill={fill ?? 'none'}
+          stroke={sketch ? 'none' : overlay.color}
+          strokeWidth={sketch ? 0 : stroke}
           strokeLinejoin="round"
           vectorEffect="non-scaling-stroke"
         />
-      ) : (
+      ) : showBody ? (
         <rect
           x={inset}
           y={inset}
           width={1 - inset * 2}
           height={1 - inset * 2}
-          fill="transparent"
-          stroke={overlay.color}
-          strokeWidth={stroke}
+          fill={fill ?? 'none'}
+          stroke={sketch ? 'none' : overlay.color}
+          strokeWidth={sketch ? 0 : stroke}
           vectorEffect="non-scaling-stroke"
         />
+      ) : null}
+      {strokes.map((strokePoints, index) =>
+        strokePoints.length < 2 ? null : (
+          <polyline
+            key={index}
+            points={strokePoints.map((point) => `${point.x},${point.y}`).join(' ')}
+            fill="none"
+            stroke={overlay.color}
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ),
       )}
     </svg>
   )
@@ -683,6 +700,7 @@ export function AnnotationLayer({
   tool = 'select',
   color = '#e05252',
   strokeWidth = 2,
+  fill = false,
   onErase,
   selectedOverlayId,
   onCreate,
@@ -793,6 +811,8 @@ export function AnnotationLayer({
       id: session.id,
       sketchSeed: session.sketchSeed,
       wordArt: session.tool === 'wordArt' ? 'outline' : undefined,
+      strokeWidth,
+      fill: fill && isClosedDrawShape(type),
     })
   }
 
@@ -975,6 +995,8 @@ export function AnnotationLayer({
               id: session.id,
               sketchSeed: session.sketchSeed,
               wordArt: session.tool === 'wordArt' ? 'outline' : undefined,
+              strokeWidth,
+              fill: fill && isClosedDrawShape(session.tool === 'wordArt' ? 'text' : session.tool),
             },
           )
         : overlayFromSession(session, end, event.shiftKey)
@@ -1139,7 +1161,7 @@ export function AnnotationLayer({
           if (line) {
             const existing = matchingLineMark(overlays, tool, line)
             if (existing) onSelect?.(existing.id)
-            else onCreate?.(createLineMark(tool, line, color))
+            else onCreate?.(createLineMark(tool, line, color, strokeWidth))
             return
           }
         }

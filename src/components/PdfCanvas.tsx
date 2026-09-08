@@ -24,11 +24,13 @@ interface PdfCanvasProps {
   annotationTool?: AnnotationTool
   annotationColor?: string
   annotationStrokeWidth?: number
+  annotationFill?: boolean
   onEraseOverlay?: (overlayId: string) => void
   selectedOverlayId?: string | null
   onCreateOverlay?: (overlay: PageOverlay) => void
   onSelectOverlay?: (overlayId: string | null) => void
   onChangeOverlay?: (overlayId: string, changes: Partial<PageOverlay>) => void
+  onDisplaySize?: (size: { width: number; height: number; scale: number }) => void
   onPageContextMenu?: (
     event: React.MouseEvent<HTMLDivElement>,
     point: { x: number; y: number },
@@ -54,11 +56,13 @@ export function PdfCanvas({
   annotationTool,
   annotationColor,
   annotationStrokeWidth,
+  annotationFill,
   onEraseOverlay,
   selectedOverlayId,
   onCreateOverlay,
   onSelectOverlay,
   onChangeOverlay,
+  onDisplaySize,
   onPageContextMenu,
   onOverlayContextMenu,
 }: PdfCanvasProps) {
@@ -145,6 +149,10 @@ export function PdfCanvas({
     }
   }, [document, pageIndex, rotationDelta, targetHeight, targetWidth, watermark])
 
+  useEffect(() => {
+    if (display.width > 0 && display.height > 0) onDisplaySize?.(display)
+  }, [display, onDisplaySize])
+
   const sampleAppearance = (overlay: PageOverlay): SampledAppearance | null => {
     const canvas = canvasRef.current
     if (!canvas) return null
@@ -179,6 +187,7 @@ export function PdfCanvas({
           tool={annotationTool}
           color={annotationColor}
           strokeWidth={annotationStrokeWidth}
+          fill={annotationFill}
           onErase={onEraseOverlay}
           selectedOverlayId={selectedOverlayId}
           onCreate={onCreateOverlay}

@@ -6,7 +6,6 @@ import {
   ArrowUpRight,
   BookOpen,
   BringToFront,
-  CheckCircle2,
   CheckSquare2,
   ChevronLeft,
   ChevronRight,
@@ -15,26 +14,26 @@ import {
   Copy,
   Diamond,
   Download,
+  Eraser,
   FilePlus2,
   FileText,
   Files,
   FolderOpen,
   Grab,
-  HardDrive,
   LoaderCircle,
-  LockKeyhole,
   ImageDown,
   Highlighter,
   Maximize2,
   Minus,
   MoveHorizontal,
   MousePointer2,
+  PenLine,
+  Pencil,
   Plus,
   Redo2,
   RotateCcw,
   RotateCw,
   Settings,
-  ShieldCheck,
   ScanSearch,
   Scissors,
   Search,
@@ -47,10 +46,9 @@ import {
   Type,
   Undo2,
   Underline,
-  Wifi,
-  WifiOff,
   X,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -79,13 +77,21 @@ import {
   initialHistory,
 } from './domain/document'
 import type { OverlayType, PageOverlay, WordArtStyle } from './domain/document'
-import { createDefaultOverlay, withSketchStyle } from './domain/overlays'
+import { createDefaultOverlay, isClosedDrawShape, withSketchStyle } from './domain/overlays'
 import { loadPreferences, savePreferences } from './domain/preferences'
 import { platformOcrAvailable } from './pdf/ocr'
 import { WORD_ART_STYLES } from './pdf/wordArt'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
 import type { OutlineEntry, SearchResult } from './pdf/navigation'
+import {
+  MAX_ZOOM,
+  MIN_ZOOM,
+  previewTargetWidth,
+  stepCustomZoom,
+  zoomRatioFromPreview,
+  type PageViewMode,
+} from './pdf/pageView'
 
 function userFacingError(error: unknown, fallback: string) {
   if (
@@ -97,7 +103,6 @@ function userFacingError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
-type ViewMode = 'width' | 'page' | 'custom'
 type NavigatorMode = 'pages' | 'outline' | 'search'
 type ContextTarget =
   | { kind: 'pages'; x: number; y: number; pageId: string }
@@ -114,6 +119,91 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const ANNOTATE_PALETTE: Array<
+  | { id: AnnotationTool; label: string; icon: LucideIcon }
+  | { id: 'signature'; label: string; icon: LucideIcon }
+> = [
+  { id: 'select', label: 'Select', icon: MousePointer2 },
+  { id: 'ink', label: 'Draw', icon: Pencil },
+  { id: 'eraser', label: 'Erase', icon: Eraser },
+  { id: 'signature', label: 'Signature', icon: PenLine },
+  { id: 'text', label: 'Text', icon: Type },
+  { id: 'wordArt', label: 'Word Art', icon: Sparkles },
+  { id: 'highlight', label: 'Highlight', icon: Highlighter },
+  { id: 'underline', label: 'Underline', icon: Underline },
+  { id: 'strikeout', label: 'Strike', icon: Strikethrough },
+  { id: 'rectangle', label: 'Box', icon: Square },
+  { id: 'ellipse', label: 'Ellipse', icon: Circle },
+  { id: 'line', label: 'Line', icon: Slash },
+  { id: 'arrow', label: 'Arrow', icon: ArrowUpRight },
+  { id: 'diamond', label: 'Diamond', icon: Diamond },
+]
+
+const ANNOTATE_COLOURS = [
+  '#111111',
+  '#ffffff',
+  '#e05252',
+  '#f4d35e',
+  '#f97316',
+  '#22c55e',
+  '#147d72',
+  '#3b82f6',
+  '#a855f7',
+]
+
+const STROKE_WEIGHTS = [1, 2, 4, 8] as const
+
+function annotationUsesColour(tool: AnnotationTool) {
+  return (
+    tool === 'ink' ||
+    tool === 'highlight' ||
+    tool === 'underline' ||
+    tool === 'strikeout' ||
+    tool === 'rectangle' ||
+    tool === 'ellipse' ||
+    tool === 'line' ||
+    tool === 'arrow' ||
+    tool === 'diamond'
+  )
+}
+
+function annotationUsesWeight(tool: AnnotationTool) {
+  return (
+    tool === 'ink' ||
+    tool === 'underline' ||
+    tool === 'strikeout' ||
+    tool === 'rectangle' ||
+    tool === 'ellipse' ||
+    tool === 'line' ||
+    tool === 'arrow' ||
+    tool === 'diamond'
+  )
+}
+
+function annotationUsesFill(tool: AnnotationTool) {
+  return tool === 'rectangle' || tool === 'ellipse' || tool === 'diamond'
+}
+
+function annotationHint(tool: AnnotationTool, hasExtracted: boolean) {
+  if (tool === 'select') return null
+  if (tool === 'ink') return 'Drag to draw. Stay on Draw for more strokes. Escape returns to Select.'
+  if (tool === 'eraser') return 'Drag over strokes, shapes, or notes. Escape returns to Select.'
+  if (tool === 'highlight' || tool === 'underline' || tool === 'strikeout') {
+    return hasExtracted
+      ? 'Click an analysed line, or drag a free mark. Shift squares. Keep the tool to mark more.'
+      : 'Drag to size a mark. Analyse text first to mark whole lines.'
+  }
+  if (tool === 'wordArt') return 'Click or drag to place stylised text, then type.'
+  if (tool === 'text') return 'Click or drag to place text, then type. Double-click a note to edit.'
+  if (tool === 'line' || tool === 'arrow') {
+    return 'Drag from A to B. Shift snaps 45°. Escape cancels. Keep the tool to draw more.'
+  }
+  if (tool === 'rectangle' || tool === 'ellipse' || tool === 'diamond') {
+    return 'Drag to size. Shift constrains. Escape cancels. Keep the tool to draw more.'
+  }
+  return 'Click the page to place the annotation.'
 }
 
 function analysingLabel(progress: string) {
@@ -170,22 +260,6 @@ async function destroySessions(sessions: ReadonlyMap<string, PdfSession>) {
   await Promise.allSettled([...sessions.values()].map(destroySession))
 }
 
-function useOnlineStatus() {
-  const [online, setOnline] = useState(navigator.onLine)
-
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine)
-    window.addEventListener('online', update)
-    window.addEventListener('offline', update)
-    return () => {
-      window.removeEventListener('online', update)
-      window.removeEventListener('offline', update)
-    }
-  }, [])
-
-  return online
-}
-
 function IconButton({
   label,
   disabled,
@@ -237,7 +311,8 @@ export function App() {
   const [stageWidth, setStageWidth] = useState(900)
   const [stageHeight, setStageHeight] = useState(700)
   const [zoom, setZoom] = useState(1)
-  const [viewMode, setViewMode] = useState<ViewMode>('width')
+  const [viewMode, setViewMode] = useState<PageViewMode>('width')
+  const [previewWidth, setPreviewWidth] = useState(0)
   const [navigatorMode, setNavigatorMode] = useState<NavigatorMode>('pages')
   const [outlineEntries, setOutlineEntries] = useState<OutlineEntry[]>([])
   const [outlineStatus, setOutlineStatus] = useState<'idle' | 'loading' | 'ready'>(
@@ -259,6 +334,7 @@ export function App() {
   const [watermarkText, setWatermarkText] = useState('')
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>('select')
   const [annotationColor, setAnnotationColor] = useState('#e05252')
+  const [annotationFill, setAnnotationFill] = useState(false)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [overlayClipboard, setOverlayClipboard] = useState<PageOverlay | null>(null)
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null)
@@ -266,6 +342,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ocrPromptOpen, setOcrPromptOpen] = useState(false)
   const [inkWidth, setInkWidth] = useState(2)
+  const [toolWeights, setToolWeights] = useState<Partial<Record<AnnotationTool, number>>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
   const addPdfInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
@@ -276,7 +353,6 @@ export function App() {
   const selectionAnchorRef = useRef<string | null>(null)
   const searchAbortRef = useRef<AbortController | null>(null)
   const analyseAbortRef = useRef<AbortController | null>(null)
-  const online = useOnlineStatus()
   const editorDocument = history.present
 
   const requestedSelectedIndex =
@@ -322,6 +398,17 @@ export function App() {
   const selectedOverlay =
     selectedPage?.overlays.find((overlay) => overlay.id === selectedOverlayId) ??
     null
+
+  const handlePreviewSize = useCallback((size: { width: number }) => {
+    setPreviewWidth(size.width)
+  }, [])
+
+  const changeZoom = (direction: 1 | -1) => {
+    const currentRatio =
+      viewMode === 'custom' ? zoom : zoomRatioFromPreview(previewWidth, stageWidth)
+    setViewMode('custom')
+    setZoom(stepCustomZoom(currentRatio, direction))
+  }
 
   useLayoutEffect(() => {
     const stage = stageRef.current
@@ -729,9 +816,26 @@ export function App() {
       if (!selectedPage) return
       dispatch({ type: 'addOverlay', pageId: selectedPage.id, overlay })
       setSelectedOverlayId(overlay.id)
-      if (overlay.type !== 'ink') setAnnotationTool('select')
+      if (overlay.type === 'text') setAnnotationTool('select')
     },
     [selectedPage],
+  )
+
+  const chooseAnnotationTool = useCallback(
+    (tool: AnnotationTool) => {
+      setAnnotationTool(tool)
+      const remembered = toolWeights[tool]
+      if (remembered != null) setInkWidth(remembered)
+    },
+    [toolWeights],
+  )
+
+  const setAnnotationWeight = useCallback(
+    (weight: number) => {
+      setInkWidth(weight)
+      setToolWeights((current) => ({ ...current, [annotationTool]: weight }))
+    },
+    [annotationTool],
   )
 
   const updateSelectedOverlay = useCallback(
@@ -808,13 +912,17 @@ export function App() {
         contextTarget.point.x,
         contextTarget.point.y,
         annotationColor,
-        options,
+        {
+          ...options,
+          strokeWidth: inkWidth,
+          fill: annotationFill && isClosedDrawShape(type),
+        },
       )
       dispatch({ type: 'addOverlay', pageId: contextTarget.pageId, overlay })
       setSelectedOverlayId(overlay.id)
       setAnnotationTool('select')
     },
-    [annotationColor, contextTarget],
+    [annotationColor, annotationFill, contextTarget, inkWidth],
   )
 
   const pasteOverlayAtContext = useCallback(() => {
@@ -918,7 +1026,7 @@ export function App() {
 
     if (contextTarget.kind === 'canvas') {
       return [
-        { id: 'draw-ink', label: 'Draw on page', onSelect: () => setAnnotationTool('ink') },
+        { id: 'draw-ink', label: 'Draw on page', onSelect: () => chooseAnnotationTool('ink') },
         { id: 'signature', label: 'Add signature', onSelect: () => setSignatureOpen(true) },
         {
           id: 'add-text',
@@ -1295,10 +1403,7 @@ export function App() {
           <span className="brand-mark">
             <FileText size={19} strokeWidth={2.4} />
           </span>
-          <span className="brand-copy">
-            <strong>pdfe</strong>
-            <span>Local workspace</span>
-          </span>
+          <strong>pdfe</strong>
         </div>
 
         <div className="toolbar" aria-label="Document toolbar">
@@ -1356,10 +1461,6 @@ export function App() {
         </div>
 
         <div className="topbar-actions">
-          <span className={`network-state ${online ? '' : 'is-offline'}`}>
-            {online ? <Wifi size={14} /> : <WifiOff size={14} />}
-            {online ? 'Online' : 'Offline'}
-          </span>
           <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
             <Settings size={18} />
           </IconButton>
@@ -1430,18 +1531,9 @@ export function App() {
           }}
         >
           <section className="welcome-panel">
-            <div className="welcome-icon" aria-hidden="true">
-              {busy === 'opening' ? (
-                <LoaderCircle className="spin" size={32} />
-              ) : (
-                <FilePlus2 size={32} />
-              )}
-            </div>
-            <p className="eyebrow">PRIVATE BY DEFAULT</p>
-            <h1>Your PDF never leaves this browser.</h1>
+            <h1>Open a PDF</h1>
             <p className="welcome-copy">
-              Merge, reorder, rotate, extract and export pages without uploading
-              anything. Drop PDFs, JPEGs or PNGs here to begin.
+              Drop a file here. It stays in this browser.
             </p>
             <div className="welcome-actions">
               <button
@@ -1461,11 +1553,6 @@ export function App() {
               >
                 <FilePlus2 size={18} /> Images to PDF
               </button>
-            </div>
-            <div className="trust-row" aria-label="Privacy features">
-              <span><LockKeyhole size={15} /> No uploads</span>
-              <span><HardDrive size={15} /> Local processing</span>
-              <span><ShieldCheck size={15} /> Offline ready</span>
             </div>
           </section>
         </main>
@@ -1641,9 +1728,7 @@ export function App() {
             <div className="rail-hint">
               {navigatorMode === 'pages' ? (
                 <><Grab size={14} /> Shift-click a range · Cmd/Ctrl-click to toggle</>
-              ) : (
-                <><ShieldCheck size={14} /> Processed locally</>
-              )}
+              ) : null}
             </div>
           </aside>
 
@@ -1701,11 +1786,8 @@ export function App() {
               </IconButton>
               <IconButton
                 label="Zoom out"
-                disabled={viewMode === 'custom' && zoom <= 0.5}
-                onClick={() => {
-                  setViewMode('custom')
-                  setZoom((value) => Math.max(0.5, value - 0.25))
-                }}
+                disabled={viewMode === 'custom' && zoom <= MIN_ZOOM}
+                onClick={() => changeZoom(-1)}
               >
                 <Minus size={17} />
               </IconButton>
@@ -1718,11 +1800,8 @@ export function App() {
               </span>
               <IconButton
                 label="Zoom in"
-                disabled={viewMode === 'custom' && zoom >= 2}
-                onClick={() => {
-                  setViewMode('custom')
-                  setZoom((value) => Math.min(2, value + 0.25))
-                }}
+                disabled={viewMode === 'custom' && zoom >= MAX_ZOOM}
+                onClick={() => changeZoom(1)}
               >
                 <Plus size={17} />
               </IconButton>
@@ -1734,10 +1813,7 @@ export function App() {
                     document={selectedSession.viewer}
                     pageIndex={selectedPage.sourcePageIndex}
                     rotationDelta={selectedPage.rotationDelta}
-                    targetWidth={
-                      Math.max(stageWidth - 128, 280) *
-                      (viewMode === 'custom' ? zoom : 1)
-                    }
+                    targetWidth={previewTargetWidth(viewMode, zoom, stageWidth)}
                     targetHeight={
                       viewMode === 'page' ? Math.max(stageHeight - 160, 260) : undefined
                     }
@@ -1749,11 +1825,13 @@ export function App() {
                     annotationTool={annotationTool}
                     annotationColor={annotationColor}
                     annotationStrokeWidth={inkWidth}
+                    annotationFill={annotationFill}
                     onEraseOverlay={(overlayId) => dispatch({ type: 'deleteOverlay', pageId: selectedPage.id, overlayId })}
                     selectedOverlayId={selectedOverlayId}
                     onCreateOverlay={addOverlay}
                     onSelectOverlay={setSelectedOverlayId}
                     onChangeOverlay={updateSelectedOverlay}
+                    onDisplaySize={handlePreviewSize}
                     onPageContextMenu={(event, point) => {
                       setContextTarget({
                         kind: 'canvas',
@@ -1793,7 +1871,6 @@ export function App() {
                     : `${selectedPages.length} pages`}
                 </h2>
               </div>
-              <CheckCircle2 size={18} />
             </div>
 
             <section className="tool-section text-analysis-tools">
@@ -1854,130 +1931,113 @@ export function App() {
 
             <section className="tool-section annotation-tools">
               <h3>Annotate</h3>
-              <div className="annotation-tool-grid">
-                <button type="button" aria-pressed={annotationTool === 'ink'} onClick={() => setAnnotationTool('ink')}>Draw</button>
-                <button type="button" aria-pressed={annotationTool === 'eraser'} onClick={() => setAnnotationTool('eraser')}>Erase stroke</button>
-                <button type="button" onClick={() => setSignatureOpen(true)}>Signature</button>
-                <button
-                  type="button"
-                  className={annotationTool === 'select' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'select'}
-                  onClick={() => setAnnotationTool('select')}
-                >
-                  <MousePointer2 size={16} /> Select
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'text' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'text'}
-                  onClick={() => setAnnotationTool('text')}
-                >
-                  <Type size={16} /> Text
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'wordArt' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'wordArt'}
-                  onClick={() => setAnnotationTool('wordArt')}
-                >
-                  <Sparkles size={16} /> Word Art
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'highlight' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'highlight'}
-                  onClick={() => setAnnotationTool('highlight')}
-                >
-                  <Highlighter size={16} /> Highlight
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'underline' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'underline'}
-                  onClick={() => setAnnotationTool('underline')}
-                >
-                  <Underline size={16} /> Underline
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'strikeout' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'strikeout'}
-                  onClick={() => setAnnotationTool('strikeout')}
-                >
-                  <Strikethrough size={16} /> Strike
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'rectangle' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'rectangle'}
-                  onClick={() => setAnnotationTool('rectangle')}
-                >
-                  <Square size={16} /> Box
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'ellipse' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'ellipse'}
-                  onClick={() => setAnnotationTool('ellipse')}
-                >
-                  <Circle size={16} /> Ellipse
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'line' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'line'}
-                  onClick={() => setAnnotationTool('line')}
-                >
-                  <Slash size={16} /> Line
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'arrow' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'arrow'}
-                  onClick={() => setAnnotationTool('arrow')}
-                >
-                  <ArrowUpRight size={16} /> Arrow
-                </button>
-                <button
-                  type="button"
-                  className={annotationTool === 'diamond' ? 'is-active' : ''}
-                  aria-pressed={annotationTool === 'diamond'}
-                  onClick={() => setAnnotationTool('diamond')}
-                >
-                  <Diamond size={16} /> Diamond
-                </button>
+              <div className="annotation-tool-grid" role="toolbar" aria-label="Annotation tools">
+                {ANNOTATE_PALETTE.map((item) => {
+                  const Icon = item.icon
+                  const active = item.id !== 'signature' && annotationTool === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={active ? 'is-active' : ''}
+                      aria-label={item.label}
+                      aria-pressed={item.id === 'signature' ? undefined : active}
+                      title={item.label}
+                      onClick={() => {
+                        if (item.id === 'signature') {
+                          setSignatureOpen(true)
+                          return
+                        }
+                        chooseAnnotationTool(item.id)
+                      }}
+                    >
+                      <Icon size={16} />
+                      <span>{item.label}</span>
+                    </button>
+                  )
+                })}
               </div>
-              {annotationTool === 'ink' && <div className="ink-controls">
-                <label>Ink colour <input type="color" value={annotationColor} onChange={(event) => setAnnotationColor(event.target.value)} /></label>
-                <label>Ink thickness <select value={inkWidth} onChange={(event) => setInkWidth(Number(event.target.value))}>
-                  {[1, 2, 4, 8].map((weight) => <option key={weight} value={weight}>{weight} pt</option>)}
-                </select></label>
-              </div>}
-              {annotationTool !== 'select' && (
-                <p className="tool-hint">
-                  {annotationTool === 'ink'
-                    ? 'Drag to draw. Each stroke can be undone separately.'
-                    : annotationTool === 'eraser'
-                      ? 'Drag over strokes, shapes, or notes to remove them. Undo restores them.'
-                      : annotationTool === 'highlight' ||
-                          annotationTool === 'underline' ||
-                          annotationTool === 'strikeout'
-                        ? selectedPage?.overlays.some((overlay) => overlay.extracted)
-                          ? 'Click an analysed line to mark that text. Drag on empty space to size a free mark. Hold Shift for a square.'
-                          : 'Drag to size a mark, or analyse text first to mark whole lines.'
-                        : annotationTool === 'wordArt'
-                          ? 'Click to place stylised Arial Black text, or drag to size the box.'
-                          : annotationTool === 'text'
-                            ? 'Click to place Arial Black text, or drag to size the box. Double-click a note to edit.'
-                            : annotationTool === 'line' || annotationTool === 'arrow'
-                              ? 'Drag from one point to another. Hold Shift to snap to 45°. Press Escape to cancel. Endpoints stay editable after you place it.'
-                              : annotationTool === 'rectangle' ||
-                                  annotationTool === 'ellipse' ||
-                                  annotationTool === 'diamond'
-                                ? 'Drag to draw. Hold Shift for a square or circle. Press Escape to cancel. Select a shape to switch between sketchy and clean.'
-                                : 'Click the page to place the annotation.'}
-                </p>
+              {(annotationUsesColour(annotationTool) ||
+                annotationUsesWeight(annotationTool) ||
+                annotationUsesFill(annotationTool)) && (
+                <div className="paint-controls">
+                  {annotationUsesColour(annotationTool) && (
+                    <div className="paint-colour-row">
+                      <div className="paint-swatches" role="group" aria-label="Annotation colours">
+                        {ANNOTATE_COLOURS.map((colour) => (
+                          <button
+                            key={colour}
+                            type="button"
+                            className={
+                              annotationColor.toLowerCase() === colour
+                                ? 'is-active'
+                                : ''
+                            }
+                            style={{ background: colour }}
+                            aria-label={`Colour ${colour}`}
+                            aria-pressed={annotationColor.toLowerCase() === colour}
+                            title={colour}
+                            onClick={() => setAnnotationColor(colour)}
+                          />
+                        ))}
+                      </div>
+                      <label className="paint-colour-picker" title="Custom colour">
+                        <span>Colour</span>
+                        <input
+                          type="color"
+                          value={annotationColor}
+                          onChange={(event) => setAnnotationColor(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  )}
+                  {annotationUsesWeight(annotationTool) && (
+                    <div className="paint-size-chips" role="group" aria-label="Stroke weight">
+                      {STROKE_WEIGHTS.map((weight) => (
+                        <button
+                          key={weight}
+                          type="button"
+                          className={inkWidth === weight ? 'is-active' : ''}
+                          aria-label={`${weight} pixel stroke`}
+                          aria-pressed={inkWidth === weight}
+                          title={`${weight} px`}
+                          onClick={() => setAnnotationWeight(weight)}
+                        >
+                          <i style={{ height: `${Math.min(10, weight)}px` }} />
+                          <span>{weight}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {annotationUsesFill(annotationTool) && (
+                    <div className="property-options paint-fill-toggle">
+                      <button
+                        type="button"
+                        className={!annotationFill ? 'is-active' : ''}
+                        aria-pressed={!annotationFill}
+                        onClick={() => setAnnotationFill(false)}
+                      >
+                        Stroke
+                      </button>
+                      <button
+                        type="button"
+                        className={annotationFill ? 'is-active' : ''}
+                        aria-pressed={annotationFill}
+                        onClick={() => setAnnotationFill(true)}
+                      >
+                        Fill
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
+              {(() => {
+                const hint = annotationHint(
+                  annotationTool,
+                  Boolean(selectedPage?.overlays.some((overlay) => overlay.extracted)),
+                )
+                return hint ? <p className="tool-hint">{hint}</p> : null
+              })()}
             </section>
 
             {selectedOverlay && (
@@ -2058,7 +2118,7 @@ export function App() {
                   <div className="property-row">
                     <span>Weight</span>
                     <div className="property-options">
-                      {[1, 2, 4].map((strokeWidth) => (
+                      {STROKE_WEIGHTS.map((strokeWidth) => (
                         <button
                           key={strokeWidth}
                           type="button"
@@ -2070,6 +2130,37 @@ export function App() {
                           {strokeWidth}px
                         </button>
                       ))}
+                    </div>
+                  </div>
+                )}
+                {isClosedDrawShape(selectedOverlay.type) && (
+                  <div className="property-row">
+                    <span>Fill</span>
+                    <div className="property-options">
+                      <button
+                        type="button"
+                        className={!selectedOverlay.backgroundColor ? 'is-active' : ''}
+                        onClick={() => {
+                          setAnnotationFill(false)
+                          updateSelectedOverlay(selectedOverlay.id, {
+                            backgroundColor: undefined,
+                          })
+                        }}
+                      >
+                        None
+                      </button>
+                      <button
+                        type="button"
+                        className={selectedOverlay.backgroundColor ? 'is-active' : ''}
+                        onClick={() => {
+                          setAnnotationFill(true)
+                          updateSelectedOverlay(selectedOverlay.id, {
+                            backgroundColor: selectedOverlay.color,
+                          })
+                        }}
+                      >
+                        Solid
+                      </button>
                     </div>
                   </div>
                 )}
@@ -2271,9 +2362,6 @@ export function App() {
           {editorDocument
             ? `${editorDocument.pages.length} page${editorDocument.pages.length === 1 ? '' : 's'} · ${editorDocument.sources.length} source${editorDocument.sources.length === 1 ? '' : 's'} · ${formatBytes(editorDocument.sizeBytes)}`
             : 'PDF files up to 250 MB'}
-        </span>
-        <span className="privacy-status">
-          <ShieldCheck size={13} /> Processed locally
         </span>
         {editorDocument && (
           <button type="button" className="close-document" onClick={() => void closeDocument()}>

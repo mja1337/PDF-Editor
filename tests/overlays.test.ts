@@ -90,8 +90,20 @@ describe('new overlays', () => {
     expect(hitExtractedLine([line], 0.2, 0.17)?.id).toBe(line.id)
     const mark = createLineMark('highlight', line, '#e05252')
     expect(mark.type).toBe('highlight')
-    expect(mark.color).toBe('#f4d35e')
+    expect(mark.color).toBe('#e05252')
     expect(mark.width).toBeGreaterThanOrEqual(line.width)
+  })
+
+  it('keeps the chosen stroke width and fill on drawn boxes', () => {
+    const box = createDrawnOverlay(
+      'rectangle',
+      { x: 0.2, y: 0.2 },
+      { x: 0.5, y: 0.45 },
+      '#3b82f6',
+      { strokeWidth: 4, fill: true, sketchSeed: 1 },
+    )
+    expect(box.strokeWidth).toBe(4)
+    expect(box.backgroundColor).toBe('#3b82f6')
   })
 })
 

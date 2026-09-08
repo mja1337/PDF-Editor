@@ -15,6 +15,7 @@ import { stampDisplayRect } from './stamp'
 import { overlayPadPx, wrapTextToWidth } from './textLayout'
 import { arrowHeadPolygon, arrowHeadSize, isLinearOverlay, lineEndpoints, lineSketchRoughness, overlayDisplayPoint } from './shapeGeometry'
 import { sketchLineBetween, sketchStrokes } from './sketch'
+import { closedShapeFill } from '../domain/overlays'
 import { archOffset } from './wordArt'
 import {
   canFlattenScanEdits,
@@ -47,6 +48,29 @@ function copyMetadata(source: PdfLibDocument, output: PdfLibDocument) {
 function colorComponents(hex: string): [number, number, number] {
   const value = /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : 'e05252'
   return [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255) as [number, number, number]
+}
+
+function diamondPdfCorners(
+  overlay: PageOverlay,
+  pageWidth: number,
+  pageHeight: number,
+  quarterTurn: QuarterTurn,
+) {
+  const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+  const midX = (overlay.x + overlay.width / 2) * display.width
+  const midY = (overlay.y + overlay.height / 2) * display.height
+  return [
+    { x: midX, y: overlay.y * display.height },
+    { x: (overlay.x + overlay.width) * display.width, y: midY },
+    { x: midX, y: (overlay.y + overlay.height) * display.height },
+    { x: overlay.x * display.width, y: midY },
+  ].map((point) => displayPointToPdf(point, pageWidth, pageHeight, quarterTurn))
+}
+
+function diamondPath(corners: Array<{ x: number; y: number }>) {
+  const [first, second, third, fourth] = corners
+  if (!first || !second || !third || !fourth) return ''
+  return `M ${first.x} ${first.y} L ${second.x} ${second.y} L ${third.x} ${third.y} L ${fourth.x} ${fourth.y} Z`
 }
 
 export async function exportPdf(
@@ -220,6 +244,28 @@ export async function exportPdf(
         (overlay.points?.length ?? 0) > 1 &&
         !isLinearOverlay(overlay.type)
       ) {
+        const fillHex = closedShapeFill(overlay)
+        if (fillHex) {
+          const [fillRed, fillGreen, fillBlue] = colorComponents(fillHex)
+          const fillColor = rgb(fillRed, fillGreen, fillBlue)
+          if (overlay.type === 'rectangle') {
+            page.drawRectangle({ ...rect, color: fillColor, opacity: overlay.opacity })
+          } else if (overlay.type === 'ellipse') {
+            page.drawEllipse({
+              x: rect.x + rect.width / 2,
+              y: rect.y + rect.height / 2,
+              xScale: rect.width / 2,
+              yScale: rect.height / 2,
+              color: fillColor,
+              opacity: overlay.opacity,
+            })
+          } else if (overlay.type === 'diamond') {
+            const path = diamondPath(
+              diamondPdfCorners(overlay, pageWidth, pageHeight, quarterTurn),
+            )
+            if (path) page.drawSvgPath(path, { color: fillColor, opacity: overlay.opacity })
+          }
+        }
         const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
         const sourcePoints = overlay.points ?? []
         const points = sourcePoints.map((point) => displayPointToPdf({
@@ -355,34 +401,46 @@ export async function exportPdf(
           opacity: overlay.opacity,
         })
       } else if (overlay.type === 'rectangle') {
+        const fillHex = closedShapeFill(overlay)
+        const fillColor = fillHex
+          ? rgb(...colorComponents(fillHex))
+          : undefined
         page.drawRectangle({
           ...rect,
+          color: fillColor,
+          opacity: fillColor ? overlay.opacity : undefined,
           borderColor: color,
           borderWidth: overlay.strokeWidth,
           borderOpacity: overlay.opacity,
         })
       } else if (overlay.type === 'ellipse') {
+        const fillHex = closedShapeFill(overlay)
+        const fillColor = fillHex
+          ? rgb(...colorComponents(fillHex))
+          : undefined
         page.drawEllipse({
           x: rect.x + rect.width / 2,
           y: rect.y + rect.height / 2,
           xScale: rect.width / 2,
           yScale: rect.height / 2,
+          color: fillColor,
+          opacity: fillColor ? overlay.opacity : undefined,
           borderColor: color,
           borderWidth: overlay.strokeWidth,
           borderOpacity: overlay.opacity,
         })
       } else if (overlay.type === 'diamond') {
-        const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
-        const midX = (overlay.x + overlay.width / 2) * display.width
-        const midY = (overlay.y + overlay.height / 2) * display.height
-        const corners = [
-          { x: midX, y: overlay.y * display.height },
-          { x: (overlay.x + overlay.width) * display.width, y: midY },
-          { x: midX, y: (overlay.y + overlay.height) * display.height },
-          { x: overlay.x * display.width, y: midY },
-        ].map((point) =>
-          displayPointToPdf(point, pageWidth, pageHeight, quarterTurn),
-        )
+        const corners = diamondPdfCorners(overlay, pageWidth, pageHeight, quarterTurn)
+        const fillHex = closedShapeFill(overlay)
+        if (fillHex) {
+          const path = diamondPath(corners)
+          if (path) {
+            page.drawSvgPath(path, {
+              color: rgb(...colorComponents(fillHex)),
+              opacity: overlay.opacity,
+            })
+          }
+        }
         for (let index = 0; index < corners.length; index += 1) {
           page.drawLine({
             start: corners[index],

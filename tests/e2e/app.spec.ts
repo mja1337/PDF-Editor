@@ -25,7 +25,7 @@ test('edits and exports a PDF without contacting another origin', async ({ page 
   })
 
   await page.goto('./')
-  await expect(page.getByRole('heading', { name: /never leaves this browser/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /open a pdf/i })).toBeVisible()
 
   await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
     name: 'workflow-fixture.pdf',
@@ -319,6 +319,7 @@ test('creates, edits, moves, resizes, and exports annotations', async ({ page })
   await page.getByRole('button', { name: 'Box', exact: true }).click()
   await layer.click({ position: { x: 230, y: 260 } })
   await expect(page.getByRole('button', { name: 'rectangle annotation' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Box', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
   await page.getByRole('button', { name: 'Line', exact: true }).click()
   const layerBox = (await layer.boundingBox())!
@@ -409,7 +410,7 @@ test('draws reversible ink and exports signatures and ink in PNG at every rotati
   await page.getByRole('button', { name: 'Undo', exact: true }).click()
   await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Redo', exact: true }).click()
-  await page.getByRole('button', { name: 'Erase stroke', exact: true }).click()
+  await page.getByRole('button', { name: 'Erase', exact: true }).click()
   await page.getByRole('button', { name: 'ink annotation' }).click()
   await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Undo', exact: true }).click()
