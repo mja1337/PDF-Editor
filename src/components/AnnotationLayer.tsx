@@ -15,6 +15,7 @@ import {
   caretIndexAtX,
   createCanvasMeasurer,
   fitOverlayToText,
+  overlayAtPageMargin,
   overlayFontCss,
   overlayFontPx,
   overlayPadPx,
@@ -284,6 +285,9 @@ function TextEditor({
   const finished = useRef(false)
   const allowBlur = useRef(false)
   const onSaveRef = useRef(onSave)
+  const [wrapAtMargin, setWrapAtMargin] = useState(
+    !overlay.extracted || overlayAtPageMargin(overlay),
+  )
 
   useEffect(() => {
     onSaveRef.current = onSave
@@ -341,7 +345,12 @@ function TextEditor({
           measure.current,
         )
         layoutRef.current = size
+        setWrapAtMargin(!overlay.extracted || overlayAtPageMargin({ ...overlay, ...size }))
         onPreview(size)
+      }}
+      style={{
+        whiteSpace: wrapAtMargin ? 'pre-wrap' : 'nowrap',
+        overflowWrap: wrapAtMargin ? 'anywhere' : 'normal',
       }}
       onKeyDown={(event) => {
         event.stopPropagation()
@@ -639,7 +648,7 @@ export function AnnotationLayer({
           <div
             key={overlay.id}
             data-overlay-id={overlay.id}
-            className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''}`}
+            className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
             style={overlayStyle(sized, renderScale, editing, editing ? editAppearance : null)}
             role={interactive && !editing ? 'button' : undefined}
             tabIndex={interactive && !editing ? 0 : undefined}

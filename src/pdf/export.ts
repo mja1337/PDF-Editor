@@ -244,29 +244,32 @@ export async function exportPdf(
         const text = overlay.text || 'Add text'
         let fontSize = overlay.fontSize ?? 18
         const pad = overlayPadPx(overlay, 1)
-        const box = overlay.extracted && overlay.edited ? coverBox(overlay) : overlay
-        const maxWidth = Math.max(1, box.width * display.width - pad.x * 2)
-        const keepSingleLine = Boolean(overlay.extracted)
+        const maxWidth = Math.max(1, overlay.width * display.width - pad.x * 2)
         const lineHeight = fontSize * (overlay.extracted ? 1 : 1.15)
         let lines: string[]
-        if (!keepSingleLine && text.includes('\n')) {
+        if (overlay.extracted) {
+          const line = text.replace(/\s+/g, ' ').trim()
+          lines =
+            font.widthOfTextAtSize(line, fontSize) <= maxWidth
+              ? [line]
+              : wrapTextToWidth(line, maxWidth, (value) => font.widthOfTextAtSize(value, fontSize))
+        } else if (text.includes('\n')) {
           lines = wrapTextToWidth(
             text,
             maxWidth,
             (value) => font.widthOfTextAtSize(value, fontSize),
           )
         } else {
-          const line = keepSingleLine ? text.replace(/\s+/g, ' ').trim() : text
-          while (fontSize > 5 && font.widthOfTextAtSize(line, fontSize) > maxWidth) {
+          while (fontSize > 5 && font.widthOfTextAtSize(text, fontSize) > maxWidth) {
             fontSize -= 0.25
           }
-          lines = [line]
+          lines = [text]
         }
         for (let index = 0; index < lines.length; index += 1) {
           const line = lines[index]
           if (!line) continue
-          const baseX = box.x * display.width + pad.x
-          const baseY = box.y * display.height + pad.y + fontSize + index * lineHeight
+          const baseX = overlay.x * display.width + pad.x
+          const baseY = overlay.y * display.height + pad.y + fontSize + index * lineHeight
           const drawAt = (textX: number, textY: number, fill = color, size = fontSize) => {
             const anchor = displayPointToPdf(
               { x: textX, y: textY },

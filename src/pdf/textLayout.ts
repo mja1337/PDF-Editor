@@ -3,6 +3,16 @@ import { cssFontFamily } from './fontMatch'
 
 export type MeasureText = (text: string) => number
 
+/** Fraction of page width/height kept clear of line growth. About 5mm on A4. */
+export const PAGE_EDGE_MARGIN = 0.03
+
+export function overlayAtPageMargin(
+  overlay: Pick<PageOverlay, 'width' | 'x'>,
+  epsilon = 0.002,
+) {
+  return overlay.x + overlay.width >= 1 - PAGE_EDGE_MARGIN - epsilon
+}
+
 export function overlayFontPx(
   overlay: Pick<PageOverlay, 'fontSize'>,
   renderScale: number,
@@ -93,21 +103,32 @@ export function fitOverlayToText(
   renderScale: number,
   measure: MeasureText,
 ) {
-  if (overlay.extracted) {
-    return { width: overlay.width, height: overlay.height }
-  }
   const fontPx = overlayFontPx(overlay, renderScale)
-  const lineHeightPx = fontPx * 1.15
+  const lineHeightPx = fontPx * (overlay.extracted ? 1 : 1.15)
   const pad = overlayPadPx(overlay, renderScale)
   const minWidthPx = overlay.width * pageWidth
-  const maxWidthPx = Math.max(minWidthPx, (1 - overlay.x) * pageWidth - 2)
+  const minHeightPx = overlay.height * pageHeight
+  const maxWidthPx = Math.max(
+    minWidthPx,
+    (1 - PAGE_EDGE_MARGIN - overlay.x) * pageWidth,
+  )
+  const maxHeightPx = Math.max(
+    minHeightPx,
+    (1 - PAGE_EDGE_MARGIN - overlay.y) * pageHeight,
+  )
   const innerMax = Math.max(1, maxWidthPx - pad.x * 2)
-  const lines = wrapTextToWidth(text.length > 0 ? text : ' ', innerMax, measure)
+  const sample = text.length > 0 ? text : ' '
+  const unwrapped = overlay.extracted ? sample.replace(/\s+/g, ' ').trim() || ' ' : sample
+  const unwrappedWidth = measure(unwrapped) + pad.x * 2 + 4
+  const fitsOnLine = overlay.extracted && unwrappedWidth <= maxWidthPx
+  const lines = fitsOnLine ? [unwrapped] : wrapTextToWidth(unwrapped, innerMax, measure)
   const contentWidth = Math.max(0, ...lines.map((line) => measure(line))) + pad.x * 2 + 4
-  const widthPx = Math.min(maxWidthPx, Math.max(minWidthPx, contentWidth))
+  const widthPx = overlay.extracted && !fitsOnLine
+    ? maxWidthPx
+    : Math.min(maxWidthPx, Math.max(minWidthPx, contentWidth))
   const heightPx = Math.min(
-    (1 - overlay.y) * pageHeight,
-    Math.max(overlay.height * pageHeight, lines.length * lineHeightPx + pad.y * 2),
+    maxHeightPx,
+    Math.max(minHeightPx, lines.length * lineHeightPx + pad.y * 2),
   )
   return {
     width: Math.max(0.01, widthPx / pageWidth),

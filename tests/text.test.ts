@@ -4,7 +4,9 @@ import { groupTextRuns, type ExtractedTextRun } from '../src/pdf/textGeometry'
 import {
   caretIndexAtX,
   fitOverlayToText,
+  overlayAtPageMargin,
   overlayFontPx,
+  PAGE_EDGE_MARGIN,
   wrapTextToWidth,
 } from '../src/pdf/textLayout'
 
@@ -80,7 +82,7 @@ describe('text layout', () => {
     expect(caretIndexAtX('Hello', 48, measure)).toBe(5)
   })
 
-  it('keeps extracted replacements inside the original line box', () => {
+  it('grows extracted replacements toward the page margin, then wraps', () => {
     expect(wrapTextToWidth('one two three', 75, measure)).toEqual([
       'one two',
       'three',
@@ -95,8 +97,10 @@ describe('text layout', () => {
       1,
       measure,
     )
-    expect(grown.width).toBeCloseTo(0.2)
+    expect(grown.width).toBeGreaterThan(0.2)
+    expect(grown.width).toBeLessThan(1 - PAGE_EDGE_MARGIN - 0.1 + 1e-6)
     expect(grown.height).toBeCloseTo(0.04)
+    expect(overlayAtPageMargin({ x: 0.1, ...grown })).toBe(false)
 
     const wrapped = fitOverlayToText(
       { x: 0.1, y: 0.2, width: 0.2, height: 0.03, fontSize: 12, extracted: true },
@@ -106,8 +110,9 @@ describe('text layout', () => {
       1,
       measure,
     )
-    expect(wrapped.width).toBeCloseTo(0.2)
-    expect(wrapped.height).toBeCloseTo(0.03)
+    expect(wrapped.width).toBeCloseTo(1 - PAGE_EDGE_MARGIN - 0.1)
+    expect(wrapped.height).toBeGreaterThan(0.03)
+    expect(overlayAtPageMargin({ x: 0.1, ...wrapped })).toBe(true)
 
     const note = fitOverlayToText(
       { x: 0.1, y: 0.2, width: 0.2, height: 0.04, fontSize: 12 },
@@ -118,6 +123,7 @@ describe('text layout', () => {
       measure,
     )
     expect(note.width).toBeGreaterThan(0.2)
+    expect(note.width).toBeLessThanOrEqual(1 - PAGE_EDGE_MARGIN - 0.1 + 1e-6)
   })
 
   it('keeps the original box when the replacement is shorter', () => {

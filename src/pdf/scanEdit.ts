@@ -1,5 +1,6 @@
 import type { PageOverlay } from '../domain/document'
 import { cssFontFamily } from './fontMatch'
+import { wrapTextToWidth } from './textLayout'
 
 export type CoverBox = {
   x: number
@@ -85,8 +86,11 @@ export function paintScannedEdits(
 
     const text = (overlay.text || '').replace(/\s+/g, ' ').trim()
     if (!text) continue
-    let size = Math.max(5, (overlay.fontSize ?? boxHeight) * renderScale)
+    const size = Math.max(5, (overlay.fontSize ?? boxHeight) * renderScale)
     const padX = Math.max(1, size * 0.08)
+    const padY = Math.max(1, size * 0.14)
+    const textX = overlay.x * width + padX
+    const maxWidth = Math.max(4, overlay.width * width - padX * 2)
     context.save()
     context.beginPath()
     context.rect(x, y, boxWidth, boxHeight)
@@ -94,14 +98,20 @@ export function paintScannedEdits(
     context.filter = 'blur(0.45px)'
     context.fillStyle = overlay.color || '#1a1a1a'
     context.textAlign = 'left'
-    context.textBaseline = 'middle'
     context.font = scanFont(overlay, size)
-    const maxWidth = Math.max(4, boxWidth - padX * 2)
-    while (size > 5 && context.measureText(text).width > maxWidth) {
-      size -= 0.25
-      context.font = scanFont(overlay, size)
+    const fitsOnLine = context.measureText(text).width <= maxWidth
+    if (fitsOnLine) {
+      context.textBaseline = 'middle'
+      context.fillText(text, textX, y + boxHeight / 2)
+    } else {
+      context.textBaseline = 'top'
+      const lines = wrapTextToWidth(text, maxWidth, (value) => context.measureText(value).width)
+      let textY = overlay.y * height + padY
+      for (const line of lines) {
+        if (line) context.fillText(line, textX, textY)
+        textY += size
+      }
     }
-    context.fillText(text, x + padX, y + boxHeight / 2)
     context.restore()
   }
 }

@@ -2019,9 +2019,9 @@ export function App() {
                   <p className="tool-hint">
                     {selectedOverlay.edited
                       ? selectedOverlay.scanned
-                        ? 'Export paints this change onto the scan so it stays in the original box, with the same paper and ink. The replacement is flattened into the page image.'
-                        : 'Export covers the original line and draws this replacement. The original PDF text remains in the file.'
-                      : 'Click the line on the page and type. Keep replacements short enough to sit in the original line.'}
+                        ? 'Export paints this change onto the scan, with the same paper and ink. The line grows toward the page margin, then wraps. The replacement is flattened into the page image.'
+                        : 'Export covers the original line and draws this replacement. The line grows toward the page margin, then wraps. The original PDF text remains in the file.'
+                      : 'Click the line on the page and type. Extra text grows toward the page margin, then wraps onto a new line.'}
                   </p>
                 )}
                 <label className="color-control">

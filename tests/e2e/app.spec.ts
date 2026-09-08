@@ -191,12 +191,16 @@ test('renders page text and analyses it into editable lines', async ({ page }) =
   await expect(page.getByRole('textbox', { name: 'Edit page text' })).toBeFocused()
   const beforeEdit = await page.locator('.annotation-extracted.is-editing').boundingBox()
   await page.getByRole('textbox', { name: 'Edit page text' }).fill(
-    'A much longer replacement that should stay in the original line box',
+    'A much longer replacement that should grow toward the page margin',
   )
   await page.getByRole('textbox', { name: 'Edit page text' }).press('Enter')
   await expect(page.getByRole('button', { name: /Edited · A much longer replacement/i })).toBeVisible()
   const afterEdit = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
-  expect(Math.abs((afterEdit?.width ?? 0) - (beforeEdit?.width ?? 0))).toBeLessThan(8)
+  expect((afterEdit?.width ?? 0) - (beforeEdit?.width ?? 0)).toBeGreaterThan(8)
+  const pageBox = await page.locator('.focused-page .pdf-canvas-wrap').boundingBox()
+  expect((afterEdit?.x ?? 0) + (afterEdit?.width ?? 0)).toBeLessThan(
+    (pageBox?.x ?? 0) + (pageBox?.width ?? 0) - 4,
+  )
 
   const lineBox = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
   await page.getByRole('button', { name: 'Highlight', exact: true }).click()

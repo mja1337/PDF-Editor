@@ -907,6 +907,17 @@ input:focus-visible,
   white-space: nowrap;
 }
 
+.annotation-extracted.is-at-margin.is-edited .annotation-text,
+.annotation-extracted.is-at-margin.is-editing .annotation-text-editor {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.annotation-extracted.is-editing:not(.is-at-margin) .annotation-text-editor {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 .annotation-extracted.annotation-scanned.is-edited .annotation-text,
 .annotation-extracted.annotation-scanned.is-editing .annotation-text-editor {
   filter: blur(0.32px);
