@@ -29,6 +29,31 @@ export function createSignatureOverlay(
   }
 }
 
+function loadImage(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Could not read the signature image.'))
+    image.src = dataUrl
+  })
+}
+
+export async function compressSignatureForStorage(dataUrl: string, maxWidth = 560) {
+  const image = await loadImage(dataUrl)
+  const scale = Math.min(1, maxWidth / Math.max(image.width, image.height, 1))
+  const width = Math.max(1, Math.round(image.width * scale))
+  const height = Math.max(1, Math.round(image.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) {
+    return { data: dataUrl, ratio: image.width / image.height }
+  }
+  context.drawImage(image, 0, 0, width, height)
+  return { data: canvas.toDataURL('image/png'), ratio: width / height }
+}
+
 export function cropSignatureCanvas(source: HTMLCanvasElement) {
   const context = source.getContext('2d')
   if (!context) {

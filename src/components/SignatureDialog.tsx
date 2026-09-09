@@ -12,7 +12,7 @@ export function SignatureDialog({
   onClose: () => void
   onApply: (signature: SavedSignature) => void
   savedSignature?: SavedSignature | null
-  onSaveSignature?: (signature: SavedSignature | null) => void
+  onSaveSignature?: (signature: SavedSignature) => Promise<void>
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -39,8 +39,9 @@ export function SignatureDialog({
     setHasInk(false)
   }, [mode])
 
-  const persistSignature = (payload: SavedSignature) => {
-    if (remember) onSaveSignature?.(payload)
+  const persistSignature = async (payload: SavedSignature) => {
+    if (!remember || !onSaveSignature) return
+    await onSaveSignature(payload)
   }
 
   const applySaved = () => {
@@ -75,7 +76,7 @@ export function SignatureDialog({
         ratio = cropped.ratio
       }
       const payload = { imageData: data, ratio }
-      persistSignature(payload)
+      if (remember) await persistSignature(payload)
       onApply(payload)
       onClose()
     } catch (cause) {

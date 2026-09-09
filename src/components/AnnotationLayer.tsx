@@ -1030,14 +1030,14 @@ export function AnnotationLayer({
   const [hoveredOverlayId, setHoveredOverlayId] = useState<string | null>(null)
   const [signatureCursor, setSignatureCursor] = useState<PagePoint | null>(null)
   const [seenOverlayIds] = useState(() => new Set(overlays.map((overlay) => overlay.id)))
-  const pageAspect = width > 0 && height > 0 ? width / height : 1
+  const signaturePageAspect = width > 0 && height > 0 ? width / height : 1
   const signatureGhost =
     pendingSignature && signatureCursor
       ? createSignatureOverlay(
           pendingSignature.imageData,
           pendingSignature.ratio,
           signatureCursor,
-          pageAspect,
+          signaturePageAspect,
         )
       : null
 
@@ -1238,6 +1238,10 @@ export function AnnotationLayer({
   }
 
   const updateGesture = (event: React.PointerEvent) => {
+    if (interactive && pendingSignature) {
+      if (event.target !== event.currentTarget) setSignatureCursor(null)
+      else setSignatureCursor(pointerPoint(event))
+    }
     if (createRef.current?.pointerId === event.pointerId) {
       updateCreateDraft(pointerPoint(event), event.shiftKey)
       return
@@ -1480,17 +1484,6 @@ export function AnnotationLayer({
     <div
       ref={layerRef}
       className={`annotation-layer ${interactive ? 'is-interactive' : ''} tool-${tool}${hoveredOverlayId ? ' is-over-mark' : ''}${pendingSignature ? ' is-placing-signature' : ''}`}
-      onPointerMove={(event) => {
-        if (!interactive || !pendingSignature) return
-        if (event.target !== event.currentTarget) {
-          setSignatureCursor(null)
-          return
-        }
-        setSignatureCursor(pointerPoint(event))
-      }}
-      onPointerLeave={() => {
-        setSignatureCursor(null)
-      }}
       onPointerDown={(event) => {
         if (!interactive || event.button !== 0) return
         if (!event.isPrimary) return
@@ -1504,7 +1497,7 @@ export function AnnotationLayer({
               pendingSignature.imageData,
               pendingSignature.ratio,
               point,
-              pageAspect,
+              signaturePageAspect,
             ),
           )
           return
@@ -1569,6 +1562,7 @@ export function AnnotationLayer({
         setHoveredOverlayId(null)
       }}
       onPointerLeave={() => {
+        setSignatureCursor(null)
         if (gestureRef.current || createRef.current || inkRef.current) return
         setHoveredOverlayId(null)
       }}

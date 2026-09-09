@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePreferences } from '../src/domain/preferences'
+import { parseLegacyPreferencesJson } from '../src/domain/appStorage'
 import {
   cleanupOcrText,
   detectionsToRuns,
@@ -137,7 +137,7 @@ describe('Tesseract browser API', () => {
 describe('OCR consent', () => {
   it('keeps a saved stamp while reading OCR consent independently', () => {
     const imageData = 'data:image/png;base64,aaaa'
-    const parsed = parsePreferences(
+    const parsed = parseLegacyPreferencesJson(
       JSON.stringify({
         stamp: { imageData, corner: 'bottom-left', size: 0.2, opacity: 0.8 },
         ocrConsent: 'accepted',
@@ -145,9 +145,9 @@ describe('OCR consent', () => {
     )
     expect(parsed.stamp).toMatchObject({ corner: 'bottom-left' })
     expect(parsed.ocrConsent).toBe('accepted')
-    expect(parsePreferences('{"stamp":{"corner":"top-left"}}').ocrConsent).toBe(
+    expect(parseLegacyPreferencesJson('{"stamp":{"corner":"top-left"}}').ocrConsent).toBe(
       'unset',
     )
-    expect(parsePreferences('{"ocrConsent":"declined"}').ocrConsent).toBe('declined')
+    expect(parseLegacyPreferencesJson('{"ocrConsent":"declined"}').ocrConsent).toBe('declined')
   })
 })

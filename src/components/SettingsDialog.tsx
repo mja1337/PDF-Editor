@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LogoStampConfig, StampCorner } from '../domain/document'
-import {
-  loadPreferences,
-  savePreferences,
-  type OcrConsent,
-} from '../domain/preferences'
+import type { OcrConsent } from '../domain/preferences'
 import { OCR_ENGINE_DISCLOSURE } from '../pdf/ocrEngine'
 
 const CORNERS: Array<{ id: StampCorner; label: string }> = [
@@ -35,18 +31,20 @@ async function readLogoFile(file: File): Promise<string> {
 
 export function SettingsDialog({
   stamp,
+  ocrConsent,
   onClose,
   onSaveStamp,
+  onSaveOcrConsent,
 }: {
   stamp: LogoStampConfig | null
+  ocrConsent: OcrConsent
   onClose: () => void
-  onSaveStamp: (stamp: LogoStampConfig | null) => void
+  onSaveStamp: (stamp: LogoStampConfig | null) => Promise<void>
+  onSaveOcrConsent: (consent: OcrConsent) => Promise<void>
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [draft, setDraft] = useState<LogoStampConfig | null>(stamp)
-  const [ocrConsent, setOcrConsent] = useState<OcrConsent>(
-    () => loadPreferences().ocrConsent,
-  )
+  const [consent, setConsent] = useState<OcrConsent>(ocrConsent)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -54,9 +52,30 @@ export function SettingsDialog({
     dialogRef.current?.showModal()
   }, [])
 
-  const persist = (next: LogoStampConfig | null) => {
-    savePreferences({ ...loadPreferences(), stamp: next })
-    onSaveStamp(next)
+  const persistStamp = async (next: LogoStampConfig | null) => {
+    setBusy(true)
+    setError('')
+    try {
+      await onSaveStamp(next)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The logo could not be saved.')
+      throw cause
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const persistConsent = async (next: OcrConsent) => {
+    setBusy(true)
+    setError('')
+    try {
+      await onSaveOcrConsent(next)
+      setConsent(next)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The OCR preference could not be saved.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -155,47 +174,40 @@ export function SettingsDialog({
           download is {OCR_ENGINE_DISCLOSURE.sizeLabel}.
         </p>
         <p>
-          {ocrConsent === 'accepted'
+          {consent === 'accepted'
             ? 'OCR is allowed on this device. The engine is fetched from this site the first time a scan needs it.'
-            : ocrConsent === 'declined'
+            : consent === 'declined'
               ? 'OCR is turned off on this device. Analyse still reads extractable PDF text.'
               : 'OCR is not enabled yet. Analyse will ask if it finds pages without text.'}
         </p>
         <div className="signature-actions">
           <button
             type="button"
-            disabled={ocrConsent === 'accepted'}
-            onClick={() => {
-              const next = { ...loadPreferences(), ocrConsent: 'accepted' as const }
-              savePreferences(next)
-              setOcrConsent('accepted')
-            }}
+            disabled={busy || consent === 'accepted'}
+            onClick={() => void persistConsent('accepted')}
           >
             Allow OCR
           </button>
           <button
             type="button"
-            disabled={ocrConsent === 'declined'}
-            onClick={() => {
-              const next = { ...loadPreferences(), ocrConsent: 'declined' as const }
-              savePreferences(next)
-              setOcrConsent('declined')
-            }}
+            disabled={busy || consent === 'declined'}
+            onClick={() => void persistConsent('declined')}
           >
             Don’t use OCR
           </button>
         </div>
       </section>
       <div className="signature-actions">
-        <button type="button" onClick={onClose}>
+        <button type="button" disabled={busy} onClick={onClose}>
           Close
         </button>
         <button
           type="button"
-          disabled={!draft}
+          disabled={!draft || busy}
           onClick={() => {
-            persist(null)
-            setDraft(null)
+            void persistStamp(null).then(() => {
+              setDraft(null)
+            })
           }}
         >
           Remove logo
@@ -205,8 +217,7 @@ export function SettingsDialog({
           disabled={!draft || busy}
           onClick={() => {
             if (!draft) return
-            persist(draft)
-            onClose()
+            void persistStamp(draft).then(() => onClose())
           }}
         >
           Save logo

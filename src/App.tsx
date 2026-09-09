@@ -75,9 +75,15 @@ import {
   documentReducer,
   initialHistory,
 } from './domain/document'
-import type { OverlayType, PageOverlay } from './domain/document'
+import type { LogoStampConfig, OverlayType, PageOverlay } from './domain/document'
 import { createDefaultOverlay, isClosedDrawShape, withSketchStyle } from './domain/overlays'
-import { loadPreferences, savePreferences, type SavedSignature } from './domain/preferences'
+import {
+  loadAppStorage,
+  saveOcrConsent,
+  saveSavedSignature,
+  saveStamp,
+} from './domain/appStorage'
+import type { OcrConsent, SavedSignature } from './domain/preferences'
 import { platformOcrAvailable } from './pdf/ocr'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
@@ -336,6 +342,11 @@ export function App() {
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null)
   const [signatureOpen, setSignatureOpen] = useState(false)
   const [pendingSignature, setPendingSignature] = useState<SavedSignature | null>(null)
+  const [savedSignature, setSavedSignature] = useState<SavedSignature | null>(null)
+  const [savedStamp, setSavedStamp] = useState<LogoStampConfig | null>(null)
+  const [ocrConsent, setOcrConsent] = useState<OcrConsent>('unset')
+  const savedStampRef = useRef(savedStamp)
+  const ocrConsentRef = useRef(ocrConsent)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ocrPromptOpen, setOcrPromptOpen] = useState(false)
   const [inkWidth, setInkWidth] = useState(2)
@@ -398,6 +409,22 @@ export function App() {
 
   const handlePreviewSize = useCallback((size: { width: number }) => {
     setPreviewWidth(size.width)
+  }, [])
+
+  useEffect(() => {
+    savedStampRef.current = savedStamp
+  }, [savedStamp])
+
+  useEffect(() => {
+    ocrConsentRef.current = ocrConsent
+  }, [ocrConsent])
+
+  useEffect(() => {
+    void loadAppStorage().then((storage) => {
+      setOcrConsent(storage.settings.ocrConsent)
+      setSavedStamp(storage.stamp)
+      setSavedSignature(storage.signature)
+    })
   }, [])
 
   const changeZoom = (direction: 1 | -1) => {
@@ -466,7 +493,7 @@ export function App() {
       if (replace) {
         await destroySessions(sessionsRef.current)
         const nextDocument = createEditorDocumentFromSources(sources)
-        nextDocument.stamp = loadPreferences().stamp
+        nextDocument.stamp = savedStampRef.current
         dispatch({ type: 'load', document: nextDocument })
         const firstPageId = nextDocument.pages[0]?.id ?? null
         setSelectedPageId(firstPageId)
@@ -552,7 +579,7 @@ export function App() {
       if (replace) {
         await destroySessions(sessionsRef.current)
         const nextDocument = createEditorDocumentFromSources(sources, 'images.pdf')
-        nextDocument.stamp = loadPreferences().stamp
+        nextDocument.stamp = savedStampRef.current
         dispatch({ type: 'load', document: nextDocument })
         const firstPageId = nextDocument.pages[0]?.id ?? null
         setSelectedPageId(firstPageId)
@@ -1235,14 +1262,14 @@ export function App() {
     setAnalyseProgress(`0 / ${editorDocument.pages.length}`)
     try {
       const { analyseEditorDocument } = await import('./pdf/text')
-      const ocrConsent = loadPreferences().ocrConsent
+      const consent = ocrConsentRef.current
       const result = await analyseEditorDocument(
         sessionsRef.current,
         editorDocument,
         controller.signal,
         (completed, total, label) =>
           setAnalyseProgress(label ?? `${completed} / ${total}`),
-        ocrConsent === 'accepted' ? 'tesseract' : 'platform',
+        consent === 'accepted' ? 'tesseract' : 'platform',
       )
       if (controller.signal.aborted) return
       dispatch({ type: 'replaceExtractedOverlays', overlays: result.overlays })
@@ -1252,7 +1279,7 @@ export function App() {
         emptyPages: result.emptyPages,
         ocrPages: result.ocrPages,
       })
-      setOcrPromptOpen(result.emptyPages > 0 && ocrConsent === 'unset')
+      setOcrPromptOpen(result.emptyPages > 0 && consent === 'unset')
       setAnnotationTool('select')
       const first = result.overlays[0]
       if (first) {
@@ -1909,7 +1936,7 @@ export function App() {
               {analyseSummary ? (
                 <p className="tool-hint">
                   {analyseSummary.blocks === 0
-                    ? scannedPageHint(loadPreferences().ocrConsent)
+                    ? scannedPageHint(ocrConsent)
                     : `${analyseSummary.blocks} text block${analyseSummary.blocks === 1 ? '' : 's'} on ${analyseSummary.pagesWithText} page${analyseSummary.pagesWithText === 1 ? '' : 's'}${analyseSummary.ocrPages ? ` · ${analyseSummary.ocrPages} read from scans` : ''}${analyseSummary.emptyPages ? ` · ${analyseSummary.emptyPages} without text` : ''}. Click a line on the page to type. Re-analyse replaces extracted lines.`}
                 </p>
               ) : (
@@ -2400,30 +2427,43 @@ export function App() {
       {ocrPromptOpen && (
         <OcrConsentDialog
           onAccept={() => {
-            savePreferences({ ...loadPreferences(), ocrConsent: 'accepted' })
-            setOcrPromptOpen(false)
-            void analyseDocument()
+            void saveOcrConsent('accepted').then(() => {
+              setOcrConsent('accepted')
+              setOcrPromptOpen(false)
+              void analyseDocument()
+            })
           }}
           onDecline={() => {
-            savePreferences({ ...loadPreferences(), ocrConsent: 'declined' })
-            setOcrPromptOpen(false)
+            void saveOcrConsent('declined').then(() => {
+              setOcrConsent('declined')
+              setOcrPromptOpen(false)
+            })
           }}
         />
       )}
       {settingsOpen && (
         <SettingsDialog
-          stamp={editorDocument?.stamp ?? loadPreferences().stamp}
+          stamp={editorDocument?.stamp ?? savedStamp}
+          ocrConsent={ocrConsent}
           onClose={() => setSettingsOpen(false)}
-          onSaveStamp={(stamp) => {
+          onSaveStamp={async (stamp) => {
+            await saveStamp(stamp)
+            setSavedStamp(stamp)
             if (editorDocument) dispatch({ type: 'setStamp', stamp })
+          }}
+          onSaveOcrConsent={async (consent) => {
+            await saveOcrConsent(consent)
+            setOcrConsent(consent)
           }}
         />
       )}
       {signatureOpen && selectedPage && (
         <SignatureDialog
-          savedSignature={loadPreferences().signature}
-          onSaveSignature={(signature) => {
-            savePreferences({ ...loadPreferences(), signature })
+          savedSignature={savedSignature}
+          onSaveSignature={async (signature) => {
+            await saveSavedSignature(signature)
+            const storage = await loadAppStorage()
+            setSavedSignature(storage.signature)
           }}
           onClose={() => setSignatureOpen(false)}
           onApply={applySignature}

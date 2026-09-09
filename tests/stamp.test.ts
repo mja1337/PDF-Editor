@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePreferences } from '../src/domain/preferences'
+import { parseLegacyPreferencesJson } from '../src/domain/appStorage'
 import { stampDisplayRect } from '../src/pdf/stamp'
 
 describe('logo stamp', () => {
@@ -20,13 +20,13 @@ describe('logo stamp', () => {
   it('reads a saved stamp and rejects malformed storage', () => {
     const imageData = 'data:image/png;base64,aaaa'
     expect(
-      parsePreferences(
+      parseLegacyPreferencesJson(
         JSON.stringify({
           stamp: { imageData, corner: 'bottom-left', size: 0.2, opacity: 0.8 },
         }),
       ).stamp,
     ).toMatchObject({ corner: 'bottom-left', size: 0.2, opacity: 0.8 })
-    expect(parsePreferences('{"stamp":{"corner":"top-left"}}').stamp).toBeNull()
-    expect(parsePreferences('not-json').stamp).toBeNull()
+    expect(parseLegacyPreferencesJson('{"stamp":{"corner":"top-left"}}').stamp).toBeNull()
+    expect(parseLegacyPreferencesJson('not-json').stamp).toBeNull()
   })
 })
