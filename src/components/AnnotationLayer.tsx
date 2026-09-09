@@ -1490,7 +1490,11 @@ export function AnnotationLayer({
         const onLayer = event.target === event.currentTarget
         const point = pointerPoint(event)
         const size = layerSize()
-        if (pendingSignature && onLayer) {
+        const onPlacementSurface =
+          event.target instanceof Node &&
+          event.currentTarget instanceof Node &&
+          (event.target === event.currentTarget || event.currentTarget.contains(event.target))
+        if (pendingSignature && onPlacementSurface) {
           event.stopPropagation()
           onPlaceSignature?.(
             createSignatureOverlay(

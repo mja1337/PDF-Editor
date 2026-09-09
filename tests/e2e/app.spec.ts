@@ -1,6 +1,23 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { readFile } from 'node:fs/promises'
+
+async function resetDeviceStorage(page: Page) {
+  await page.evaluate(async () => {
+    localStorage.clear()
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase('pdfe')
+      request.onerror = () => reject(request.error ?? new Error('Could not reset device storage.'))
+      request.onblocked = () => resolve()
+      request.onsuccess = () => resolve()
+    })
+  })
+}
+
+async function clickLayerPoint(page: Page, layer: Locator, xRatio: number, yRatio: number) {
+  const box = (await layer.boundingBox())!
+  await page.mouse.click(box.x + box.width * xRatio, box.y + box.height * yRatio)
+}
 
 async function fixtureBytes() {
   const pdf = await PDFDocument.create()
@@ -437,11 +454,12 @@ test('draws reversible ink and exports signatures and ink in PNG at every rotati
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('button', { name: 'Type', exact: true }).click()
   await dialog.getByLabel('Your name').fill('Renée — Smith')
+  await dialog.locator('.signature-remember input').setChecked(false)
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog).toBeHidden()
   const signLayer = page.locator('.focused-page .annotation-layer')
-  const signBounds = (await signLayer.boundingBox())!
-  await signLayer.click({ position: { x: signBounds.width * 0.5, y: signBounds.height * 0.72 } })
+  await expect(signLayer).toHaveClass(/is-placing-signature/)
+  await clickLayerPoint(page, signLayer, 0.5, 0.72)
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
   await page.getByRole('button', { name: 'signature annotation' }).click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Duplicate annotation' }).click()
@@ -476,6 +494,7 @@ test('draws reversible ink and exports signatures and ink in PNG at every rotati
 
 test('creates drawn and uploaded signatures and reports unsupported text', async ({ page }) => {
   await page.goto('./')
+  await resetDeviceStorage(page)
   await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
     name: 'signature-modes.pdf', mimeType: 'application/pdf', buffer: await fixtureBytes(),
   })
@@ -491,12 +510,12 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
   await page.mouse.down()
   await page.mouse.move(bounds.x + 150, bounds.y + 90, { steps: 10 })
   await page.mouse.up()
+  await dialog.locator('.signature-remember input').setChecked(false)
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog).toBeHidden()
   const signLayer = page.locator('.focused-page .annotation-layer')
   await expect(signLayer).toHaveClass(/is-placing-signature/)
-  const signBounds = (await signLayer.boundingBox())!
-  await signLayer.click({ position: { x: signBounds.width * 0.45, y: signBounds.height * 0.7 } })
+  await clickLayerPoint(page, signLayer, 0.45, 0.7)
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
   await page.keyboard.press('Escape')
   await expect(signLayer).not.toHaveClass(/is-placing-signature/)
@@ -511,12 +530,13 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
       'base64',
     ),
   })
-  await expect(dialog.locator('.signature-upload-preview')).toBeVisible()
+  await expect(dialog.getByRole('img', { name: 'Signature preview' })).toBeVisible()
+  await dialog.locator('.signature-remember input').setChecked(false)
   await expect(dialog.getByRole('button', { name: 'Apply signature' })).toBeEnabled()
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog).toBeHidden()
   await expect(signLayer).toHaveClass(/is-placing-signature/)
-  await signLayer.click({ position: { x: signBounds.width * 0.55, y: signBounds.height * 0.75 } })
+  await clickLayerPoint(page, signLayer, 0.55, 0.75)
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
 })
 
