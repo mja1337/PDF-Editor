@@ -848,6 +848,7 @@ export function App() {
   const placeSignature = useCallback(
     (overlay: PageOverlay) => {
       addOverlay(overlay)
+      setPendingSignature(null)
     },
     [addOverlay],
   )

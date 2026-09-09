@@ -72,7 +72,9 @@ export function PdfCanvas({
   pendingSignature,
   onPlaceSignature,
 }: PdfCanvasProps) {
+  const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const lastPlacementRef = useRef(0)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [display, setDisplay] = useState({ width: 0, height: 0, scale: 1 })
 
@@ -165,40 +167,70 @@ export function PdfCanvas({
     return sampleOverlayPixels(canvas, overlay, display.width, display.height)
   }
 
-  const placePendingSignature = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!pendingSignature || !onPlaceSignature || !interactiveAnnotations) return
-    if (event.button !== 0 || !event.isPrimary) return
-    const canvas = canvasRef.current
-    if (!canvas || display.width <= 0 || display.height <= 0) return
-    const bounds = canvas.getBoundingClientRect()
-    if (
-      event.clientX < bounds.left ||
-      event.clientX > bounds.right ||
-      event.clientY < bounds.top ||
-      event.clientY > bounds.bottom
-    ) {
-      return
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap || !pendingSignature || !onPlaceSignature || !interactiveAnnotations) return
+    if (display.width <= 0 || display.height <= 0) return
+
+    const placeAt = (clientX: number, clientY: number, event: Event) => {
+      const now = Date.now()
+      if (now - lastPlacementRef.current < 50) return
+      const bounds = wrap.getBoundingClientRect()
+      if (
+        bounds.width <= 0 ||
+        bounds.height <= 0 ||
+        clientX < bounds.left ||
+        clientX > bounds.right ||
+        clientY < bounds.top ||
+        clientY > bounds.bottom
+      ) {
+        return
+      }
+      lastPlacementRef.current = now
+      onPlaceSignature(
+        createSignatureOverlay(
+          pendingSignature.imageData,
+          pendingSignature.ratio,
+          {
+            x: (clientX - bounds.left) / bounds.width,
+            y: (clientY - bounds.top) / bounds.height,
+          },
+          display.width / display.height,
+        ),
+      )
+      event.preventDefault()
+      event.stopImmediatePropagation()
     }
-    onPlaceSignature(
-      createSignatureOverlay(
-        pendingSignature.imageData,
-        pendingSignature.ratio,
-        {
-          x: (event.clientX - bounds.left) / bounds.width,
-          y: (event.clientY - bounds.top) / bounds.height,
-        },
-        display.width / display.height,
-      ),
-    )
-    event.preventDefault()
-    event.stopPropagation()
-  }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return
+      placeAt(event.clientX, event.clientY, event)
+    }
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0) return
+      placeAt(event.clientX, event.clientY, event)
+    }
+
+    wrap.addEventListener('pointerdown', onPointerDown, true)
+    wrap.addEventListener('mousedown', onMouseDown, true)
+    return () => {
+      wrap.removeEventListener('pointerdown', onPointerDown, true)
+      wrap.removeEventListener('mousedown', onMouseDown, true)
+    }
+  }, [
+    display.height,
+    display.width,
+    interactiveAnnotations,
+    onPlaceSignature,
+    pendingSignature,
+  ])
 
   return (
     <div
+      ref={wrapRef}
       className={`pdf-canvas-wrap ${className ?? ''}${pendingSignature ? ' is-placing-signature' : ''}`}
       data-status={status}
-      onPointerDownCapture={placePendingSignature}
     >
       {status === 'loading' && <div className="canvas-skeleton" aria-hidden="true" />}
       {status === 'error' && (
@@ -236,6 +268,7 @@ export function PdfCanvas({
           onPageContextMenu={onPageContextMenu}
           onOverlayContextMenu={onOverlayContextMenu}
           pendingSignature={pendingSignature}
+          onPlaceSignature={onPlaceSignature}
         />
       )}
     </div>

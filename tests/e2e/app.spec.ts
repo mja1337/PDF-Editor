@@ -15,14 +15,12 @@ async function resetDeviceStorage(page: Page) {
 }
 
 async function placePendingSignature(page: Page, xRatio: number, yRatio: number) {
-  const canvas = page.locator('.focused-page .pdf-canvas-wrap canvas')
-  await expect(canvas).toBeVisible()
-  const box = (await canvas.boundingBox())!
-  const x = box.x + box.width * xRatio
-  const y = box.y + box.height * yRatio
-  await page.mouse.move(x, y)
-  await page.mouse.down()
-  await page.mouse.up()
+  const layer = page.locator('.focused-page .annotation-layer')
+  await expect(layer).toBeVisible()
+  const box = (await layer.boundingBox())!
+  await layer.click({
+    position: { x: box.width * xRatio, y: box.height * yRatio },
+  })
 }
 
 async function fixtureBytes() {
