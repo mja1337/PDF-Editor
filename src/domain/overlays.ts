@@ -9,6 +9,7 @@ import {
   lineEndpoints,
   localPoint,
   pagePoint,
+  topmostOverlayAt,
   type PagePoint,
 } from '../pdf/shapeGeometry'
 
@@ -258,6 +259,19 @@ export function hitExtractedLine(
       y >= overlay.y - padding &&
       y <= overlay.y + overlay.height + padding,
   )
+}
+
+export function extractedLineAtPoint(
+  overlays: PageOverlay[],
+  point: PagePoint,
+  pageWidth: number,
+  pageHeight: number,
+) {
+  const hit = topmostOverlayAt(overlays, point, pageWidth, pageHeight, {
+    includeExtracted: true,
+  })
+  if (hit?.extracted && hit.type === 'text') return hit
+  return hitExtractedLine(overlays, point.x, point.y)
 }
 
 export function createLineMark(

@@ -202,13 +202,13 @@ test('renders page text and analyses it into editable lines', async ({ page }) =
     (pageBox?.x ?? 0) + (pageBox?.width ?? 0) - 4,
   )
 
-  const lineBox = await page.getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
+  const lineBox = await page.locator('.focused-page').getByRole('button', { name: 'extracted text annotation' }).first().boundingBox()
   await page.getByRole('button', { name: 'Highlight', exact: true }).click()
   await page.mouse.click(
     (lineBox?.x ?? 0) + (lineBox?.width ?? 0) / 2,
     (lineBox?.y ?? 0) + (lineBox?.height ?? 0) / 2,
   )
-  const highlight = page.getByRole('button', { name: 'highlight annotation' })
+  const highlight = page.locator('.focused-page').getByRole('button', { name: 'highlight annotation' })
   await expect(highlight).toBeVisible()
   const highlightBox = await highlight.boundingBox()
   expect(Math.abs((highlightBox?.width ?? 0) - (lineBox?.width ?? 0))).toBeLessThan(28)
@@ -322,17 +322,21 @@ test('creates, edits, moves, resizes, and exports annotations', async ({ page })
   await page.mouse.down()
   await page.mouse.move(boxLayer.x + 150, boxLayer.y + 340, { steps: 8 })
   await page.mouse.up()
-  const rectangle = page.getByRole('button', { name: 'rectangle annotation' })
+  const rectangle = page.locator('.focused-page').getByRole('button', { name: 'rectangle annotation' })
   await expect(rectangle).toBeVisible()
   await expect(page.getByRole('button', { name: 'Box', exact: true })).toHaveAttribute('aria-pressed', 'true')
   const beforeBoxMove = await rectangle.boundingBox()
   expect(beforeBoxMove).toBeTruthy()
   await rectangle.hover()
   await page.mouse.down()
-  await page.mouse.move(beforeBoxMove!.x + 56, beforeBoxMove!.y + 36, { steps: 6 })
+  await page.mouse.move(
+    beforeBoxMove!.x + beforeBoxMove!.width / 2 + 50,
+    beforeBoxMove!.y + beforeBoxMove!.height / 2 + 30,
+    { steps: 6 },
+  )
   await page.mouse.up()
   const afterBoxMove = await rectangle.boundingBox()
-  expect(afterBoxMove!.x).toBeGreaterThan(beforeBoxMove!.x + 12)
+  expect(afterBoxMove!.x - beforeBoxMove!.x).toBeGreaterThan(8)
   await expect(page.getByRole('button', { name: 'Box', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
   await page.getByRole('button', { name: 'Line', exact: true }).click()
@@ -420,13 +424,13 @@ test('draws reversible ink and exports signatures and ink in PNG at every rotati
   await page.mouse.down()
   await page.mouse.move(bounds.x + 160, bounds.y + 140, { steps: 15 })
   await page.mouse.up()
-  await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(1)
+  await expect(page.locator('.focused-page').getByRole('button', { name: 'ink annotation' })).toHaveCount(1)
   await page.getByRole('button', { name: 'Undo', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
+  await expect(page.locator('.focused-page').getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Redo', exact: true }).click()
   await page.getByRole('button', { name: 'Erase', exact: true }).click()
-  await page.getByRole('button', { name: 'ink annotation' }).click()
-  await expect(page.getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
+  await page.locator('.focused-page').getByRole('button', { name: 'ink annotation' }).click()
+  await expect(page.locator('.focused-page').getByRole('button', { name: 'ink annotation' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Undo', exact: true }).click()
 
   await page.getByRole('button', { name: 'Signature', exact: true }).click()

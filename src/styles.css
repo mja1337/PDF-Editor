@@ -809,10 +809,15 @@ input:focus-visible,
   cursor: text;
 }
 
-.annotation-layer.is-interactive.tool-highlight .annotation-extracted:not(.is-edited),
-.annotation-layer.is-interactive.tool-underline .annotation-extracted:not(.is-edited),
-.annotation-layer.is-interactive.tool-strikeout .annotation-extracted:not(.is-edited) {
+.annotation-layer.is-interactive.tool-highlight .annotation-extracted,
+.annotation-layer.is-interactive.tool-underline .annotation-extracted,
+.annotation-layer.is-interactive.tool-strikeout .annotation-extracted {
   pointer-events: none;
+}
+
+.annotation-layer.is-interactive:not(.tool-select):not(.tool-eraser):not(.tool-highlight):not(.tool-underline):not(.tool-strikeout) .annotation:not(.annotation-extracted) {
+  pointer-events: auto;
+  cursor: move;
 }
 
 .annotation.is-selected {

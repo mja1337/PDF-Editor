@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultOverlay, createDrawnOverlay, createInkOverlay, createLineMark, hitExtractedLine } from '../src/domain/overlays'
+import { createDefaultOverlay, createDrawnOverlay, createInkOverlay, createLineMark, extractedLineAtPoint, hitExtractedLine } from '../src/domain/overlays'
 import { lineEndpoints, overlayHitsPoint, pagePoint, topmostOverlayAt } from '../src/pdf/shapeGeometry'
 import { sketchArrowPoints, sketchClosedInPixels, sketchRectPoints, sketchStrokes } from '../src/pdf/sketch'
 
@@ -31,6 +31,14 @@ describe('new overlays', () => {
       expect(gap).toBeGreaterThan(0.002)
       expect(gap).toBeLessThan(0.08)
     }
+  })
+
+  it('finds analysed lines for highlight tools from the topmost hit', () => {
+    const line = createDefaultOverlay('text', 0.2, 0.4, '#111111')
+    const extracted = { ...line, extracted: true, edited: true, text: 'Quarterly planning notes' }
+    const box = createDrawnOverlay('rectangle', { x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }, '#e05252')
+    const hit = extractedLineAtPoint([box, extracted], { x: 0.35, y: 0.42 }, 800, 1000)
+    expect(hit?.id).toBe(extracted.id)
   })
 
   it('keeps closed-shape sketch wobble in pixels when the box is resized', () => {

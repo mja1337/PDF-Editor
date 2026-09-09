@@ -8,7 +8,7 @@ import {
   createInkOverlay,
   liveInkOverlay,
   createLineMark,
-  hitExtractedLine,
+  extractedLineAtPoint,
   isClosedDrawShape,
   matchingLineMark,
   nextSketchSeed,
@@ -116,7 +116,8 @@ function isLineMarkTool(tool: AnnotationTool) {
 }
 
 function overlayCanStartMove(tool: AnnotationTool, overlay: PageOverlay) {
-  if (isLineMarkTool(tool) && overlay.extracted && !overlay.edited) return false
+  if (tool === 'eraser') return !(overlay.extracted && !overlay.edited)
+  if (isLineMarkTool(tool) && overlay.extracted) return false
   return toolCanGrabMarks(tool)
 }
 
@@ -854,6 +855,7 @@ function OverlayItem({
   onEditPreview,
   onEditSave,
   onEditCancel,
+  onErase,
 }: {
   overlay: PageOverlay
   visible: PageOverlay
@@ -877,6 +879,7 @@ function OverlayItem({
   onEditPreview: (preview: { width: number; height: number }) => void
   onEditSave: (value: string, size: { width: number; height: number }) => void
   onEditCancel: () => void
+  onErase?: (overlayId: string) => void
 }) {
   const sized =
     editing && editPreview
@@ -901,6 +904,11 @@ function OverlayItem({
       }}
       onPointerDown={(event) => {
         if (editing) return
+        if (interactive && tool === 'eraser' && event.button === 0) {
+          event.stopPropagation()
+          onErase?.(overlay.id)
+          return
+        }
         if (!overlayCanStartMove(tool, overlay)) return
         onBeginMove(event, overlay)
       }}
@@ -1463,12 +1471,20 @@ export function AnnotationLayer({
         const size = layerSize()
         if (tool === 'image') return
         if (tool === 'eraser') {
-          if (!onLayer) return
           eraserRef.current = { pointerId: event.pointerId, erased: new Set() }
           withPointerCapture(event.currentTarget, event.pointerId, true)
           activePointerIdRef.current = event.pointerId
           eraseAt(point)
           return
+        }
+        if (isLineMarkTool(tool)) {
+          const line = extractedLineAtPoint(overlays, point, size.width, size.height)
+          if (line) {
+            const existing = matchingLineMark(overlays, tool, line)
+            if (existing) onSelect?.(existing.id)
+            else onCreate?.(createLineMark(tool, line, color, strokeWidth))
+            return
+          }
         }
         if (onLayer && toolCanGrabMarks(tool)) {
           const hit = topmostOverlayAt(overlays, point, size.width, size.height)
@@ -1497,15 +1513,6 @@ export function AnnotationLayer({
           return
         }
         if (!DRAW_TOOLS.has(tool)) return
-        if (isLineMarkTool(tool)) {
-          const line = hitExtractedLine(overlays, point.x, point.y)
-          if (line) {
-            const existing = matchingLineMark(overlays, tool, line)
-            if (existing) onSelect?.(existing.id)
-            else onCreate?.(createLineMark(tool, line, color, strokeWidth))
-            return
-          }
-        }
         if (!onLayer) return
         createRef.current = {
           pointerId: event.pointerId,
@@ -1580,6 +1587,7 @@ export function AnnotationLayer({
             onBeginResize={beginResizeOverlay}
             onBeginEndpoint={beginEndpointOverlay}
             onBeginTextEdit={beginTextEdit}
+            onErase={onErase}
             onEditPreview={(preview) => {
               setEditSession((session) =>
                 session?.id === overlay.id ? { ...session, preview } : session,
