@@ -37,7 +37,12 @@ describe('new overlays', () => {
     const line = createDefaultOverlay('text', 0.2, 0.4, '#111111')
     const extracted = { ...line, extracted: true, edited: true, text: 'Quarterly planning notes' }
     const box = createDrawnOverlay('rectangle', { x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }, '#e05252')
-    const hit = extractedLineAtPoint([box, extracted], { x: 0.35, y: 0.42 }, 800, 1000)
+    const hit = extractedLineAtPoint(
+      [box, extracted],
+      { x: extracted.x + extracted.width / 2, y: extracted.y + extracted.height / 2 },
+      800,
+      1000,
+    )
     expect(hit?.id).toBe(extracted.id)
   })
 
