@@ -1628,6 +1628,7 @@ input:focus-visible,
 .signature-name { display: block; padding: 18px; overflow-wrap: anywhere; font: 700 28px 'Noto Sans', sans-serif; color: #172a46; background: white; }
 .signature-dialog canvas { width: 100%; background: white; border-radius: 8px; touch-action: none; }
 .signature-upload-preview { max-width: 100%; max-height: 190px; background: white; }
+.pdf-canvas-wrap.is-placing-signature { cursor: crosshair; }
 .annotation-layer.is-placing-signature { cursor: crosshair; }
 .annotation-layer.is-placing-signature .annotation { pointer-events: none; }
 .annotation-layer.is-placing-signature .annotation-resize-handle,

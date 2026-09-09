@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { readFile } from 'node:fs/promises'
 
@@ -14,9 +14,15 @@ async function resetDeviceStorage(page: Page) {
   })
 }
 
-async function clickLayerPoint(page: Page, layer: Locator, xRatio: number, yRatio: number) {
-  const box = (await layer.boundingBox())!
-  await page.mouse.click(box.x + box.width * xRatio, box.y + box.height * yRatio)
+async function placePendingSignature(page: Page, xRatio: number, yRatio: number) {
+  const canvas = page.locator('.focused-page .pdf-canvas-wrap canvas')
+  await expect(canvas).toBeVisible()
+  const box = (await canvas.boundingBox())!
+  const x = box.x + box.width * xRatio
+  const y = box.y + box.height * yRatio
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.up()
 }
 
 async function fixtureBytes() {
@@ -429,6 +435,7 @@ test('shows relevant context actions for pages, canvas, and annotations', async 
 
 test('draws reversible ink and exports signatures and ink in PNG at every rotation offline', async ({ page, context }) => {
   await page.goto('./')
+  await resetDeviceStorage(page)
   await page.evaluate(() => navigator.serviceWorker.ready)
   await context.setOffline(true)
   await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
@@ -457,10 +464,9 @@ test('draws reversible ink and exports signatures and ink in PNG at every rotati
   await dialog.locator('.signature-remember input').setChecked(false)
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog).toBeHidden()
-  const signLayer = page.locator('.focused-page .annotation-layer')
-  await expect(signLayer).toHaveClass(/is-placing-signature/)
-  await clickLayerPoint(page, signLayer, 0.5, 0.72)
-  await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
+  await expect(page.locator('.focused-page .pdf-canvas-wrap')).toHaveClass(/is-placing-signature/)
+  await placePendingSignature(page, 0.5, 0.72)
+  await expect(page.locator('.focused-page').getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
   await page.getByRole('button', { name: 'signature annotation' }).click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Duplicate annotation' }).click()
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
@@ -513,12 +519,12 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
   await dialog.locator('.signature-remember input').setChecked(false)
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog).toBeHidden()
-  const signLayer = page.locator('.focused-page .annotation-layer')
-  await expect(signLayer).toHaveClass(/is-placing-signature/)
-  await clickLayerPoint(page, signLayer, 0.45, 0.7)
-  await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
+  const pageWrap = page.locator('.focused-page .pdf-canvas-wrap')
+  await expect(pageWrap).toHaveClass(/is-placing-signature/)
+  await placePendingSignature(page, 0.45, 0.7)
+  await expect(page.locator('.focused-page').getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
   await page.keyboard.press('Escape')
-  await expect(signLayer).not.toHaveClass(/is-placing-signature/)
+  await expect(pageWrap).not.toHaveClass(/is-placing-signature/)
   await page.getByRole('button', { name: 'Signature', exact: true }).click()
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Upload', exact: true }).click()
@@ -535,9 +541,9 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
   await expect(dialog.getByRole('button', { name: 'Apply signature' })).toBeEnabled()
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog).toBeHidden()
-  await expect(signLayer).toHaveClass(/is-placing-signature/)
-  await clickLayerPoint(page, signLayer, 0.55, 0.75)
-  await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
+  await expect(pageWrap).toHaveClass(/is-placing-signature/)
+  await placePendingSignature(page, 0.55, 0.75)
+  await expect(page.locator('.focused-page').getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
 })
 
 test('keeps a 100-page document virtualized', async ({ page }) => {

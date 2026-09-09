@@ -72,7 +72,6 @@ interface AnnotationLayerProps {
     overlayId: string,
   ) => void
   pendingSignature?: SavedSignature | null
-  onPlaceSignature?: (overlay: PageOverlay) => void
 }
 
 interface Gesture {
@@ -1005,7 +1004,6 @@ export function AnnotationLayer({
   onPageContextMenu,
   onOverlayContextMenu,
   pendingSignature = null,
-  onPlaceSignature,
 }: AnnotationLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
@@ -1490,22 +1488,7 @@ export function AnnotationLayer({
         const onLayer = event.target === event.currentTarget
         const point = pointerPoint(event)
         const size = layerSize()
-        const onPlacementSurface =
-          event.target instanceof Node &&
-          event.currentTarget instanceof Node &&
-          (event.target === event.currentTarget || event.currentTarget.contains(event.target))
-        if (pendingSignature && onPlacementSurface) {
-          event.stopPropagation()
-          onPlaceSignature?.(
-            createSignatureOverlay(
-              pendingSignature.imageData,
-              pendingSignature.ratio,
-              point,
-              signaturePageAspect,
-            ),
-          )
-          return
-        }
+        if (pendingSignature) return
         if (tool === 'image') return
         if (tool === 'eraser') {
           eraserRef.current = { pointerId: event.pointerId, erased: new Set() }

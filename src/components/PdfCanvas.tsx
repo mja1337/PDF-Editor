@@ -7,6 +7,7 @@ import type {
   WatermarkConfig,
 } from '../domain/document'
 import type { SavedSignature } from '../domain/preferences'
+import { createSignatureOverlay } from '../pdf/signatureImage'
 import { sampleOverlayPixels, type SampledAppearance } from '../pdf/pageSample'
 import { AnnotationLayer, type AnnotationTool } from './AnnotationLayer'
 
@@ -164,8 +165,41 @@ export function PdfCanvas({
     return sampleOverlayPixels(canvas, overlay, display.width, display.height)
   }
 
+  const placePendingSignature = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!pendingSignature || !onPlaceSignature || !interactiveAnnotations) return
+    if (event.button !== 0 || !event.isPrimary) return
+    const canvas = canvasRef.current
+    if (!canvas || display.width <= 0 || display.height <= 0) return
+    const bounds = canvas.getBoundingClientRect()
+    if (
+      event.clientX < bounds.left ||
+      event.clientX > bounds.right ||
+      event.clientY < bounds.top ||
+      event.clientY > bounds.bottom
+    ) {
+      return
+    }
+    onPlaceSignature(
+      createSignatureOverlay(
+        pendingSignature.imageData,
+        pendingSignature.ratio,
+        {
+          x: (event.clientX - bounds.left) / bounds.width,
+          y: (event.clientY - bounds.top) / bounds.height,
+        },
+        display.width / display.height,
+      ),
+    )
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
   return (
-    <div className={`pdf-canvas-wrap ${className ?? ''}`} data-status={status}>
+    <div
+      className={`pdf-canvas-wrap ${className ?? ''}${pendingSignature ? ' is-placing-signature' : ''}`}
+      data-status={status}
+      onPointerDownCapture={placePendingSignature}
+    >
       {status === 'loading' && <div className="canvas-skeleton" aria-hidden="true" />}
       {status === 'error' && (
         <p className="canvas-error" role="status">
@@ -202,7 +236,6 @@ export function PdfCanvas({
           onPageContextMenu={onPageContextMenu}
           onOverlayContextMenu={onOverlayContextMenu}
           pendingSignature={pendingSignature}
-          onPlaceSignature={onPlaceSignature}
         />
       )}
     </div>
