@@ -1,3 +1,34 @@
+import type { PageOverlay } from '../domain/document'
+import { clamp01 } from './shapeGeometry'
+
+export function createSignatureOverlay(
+  imageData: string,
+  ratio: number,
+  center: { x: number; y: number },
+  pageAspect = 1,
+): PageOverlay {
+  const width = Math.min(0.45, 0.22 * ratio)
+  let height = width / ratio
+  if (pageAspect > 0) {
+    height = Math.min(0.8, height * pageAspect)
+  }
+  const x = clamp01(center.x - width / 2)
+  const y = clamp01(center.y - height / 2)
+  return {
+    id: crypto.randomUUID(),
+    type: 'image',
+    signature: true,
+    x: Math.min(x, 1 - width),
+    y: Math.min(y, 1 - height),
+    width,
+    height,
+    color: '#172a46',
+    opacity: 1,
+    strokeWidth: 2,
+    imageData,
+  }
+}
+
 export function cropSignatureCanvas(source: HTMLCanvasElement) {
   const context = source.getContext('2d')
   if (!context) {

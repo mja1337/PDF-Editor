@@ -1,34 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PageOverlay } from '../domain/document'
 import type { SavedSignature } from '../domain/preferences'
 import { embedEditorFont, validateEditorText } from '../pdf/fonts'
 import { cropSignatureCanvas } from '../pdf/signatureImage'
 
-function signatureOverlayFromImage(data: string, ratio: number): PageOverlay {
-  const width = Math.min(0.45, 0.22 * ratio)
-  return {
-    id: crypto.randomUUID(),
-    type: 'image',
-    signature: true,
-    x: 0.28,
-    y: 0.38,
-    width,
-    height: width / ratio,
-    color: '#172a46',
-    opacity: 1,
-    strokeWidth: 2,
-    imageData: data,
-  }
-}
-
 export function SignatureDialog({
   onClose,
-  onInsert,
+  onApply,
   savedSignature,
   onSaveSignature,
 }: {
   onClose: () => void
-  onInsert: (overlay: PageOverlay) => void
+  onApply: (signature: SavedSignature) => void
   savedSignature?: SavedSignature | null
   onSaveSignature?: (signature: SavedSignature | null) => void
 }) {
@@ -61,13 +43,13 @@ export function SignatureDialog({
     if (remember) onSaveSignature?.(payload)
   }
 
-  const insertSaved = () => {
+  const applySaved = () => {
     if (!savedSignature) return
-    onInsert(signatureOverlayFromImage(savedSignature.imageData, savedSignature.ratio))
+    onApply(savedSignature)
     onClose()
   }
 
-  const insert = async () => {
+  const apply = async () => {
     setBusy(true)
     setError('')
     try {
@@ -92,8 +74,9 @@ export function SignatureDialog({
         data = cropped.data
         ratio = cropped.ratio
       }
-      persistSignature({ imageData: data, ratio })
-      onInsert(signatureOverlayFromImage(data, ratio))
+      const payload = { imageData: data, ratio }
+      persistSignature(payload)
+      onApply(payload)
       onClose()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The signature could not be created.')
@@ -118,8 +101,8 @@ export function SignatureDialog({
       {savedSignature && (
         <div className="signature-saved">
           <img className="signature-upload-preview" src={savedSignature.imageData} alt="Saved signature" />
-          <button type="button" disabled={busy} onClick={insertSaved}>
-            Insert saved signature
+          <button type="button" disabled={busy} onClick={applySaved}>
+            Use saved signature
           </button>
         </div>
       )}
@@ -257,7 +240,7 @@ export function SignatureDialog({
         Remember this signature on this device
       </label>
 
-      <p>After inserting, drag to move or use the corner handles to resize.</p>
+      <p>After applying, click the page where the signature should go. Drag to move or use corner handles to resize.</p>
 
       <div className="signature-actions">
         <button type="button" disabled={busy} onClick={onClose}>
@@ -266,9 +249,9 @@ export function SignatureDialog({
         <button
           type="button"
           disabled={busy || (mode === 'type' ? !name.trim() : mode === 'draw' ? !hasInk : !uploaded)}
-          onClick={() => void insert()}
+          onClick={() => void apply()}
         >
-          {busy ? 'Preparing…' : 'Insert signature'}
+          {busy ? 'Preparing…' : 'Apply signature'}
         </button>
       </div>
     </dialog>

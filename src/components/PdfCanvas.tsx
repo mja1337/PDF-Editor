@@ -6,6 +6,7 @@ import type {
   QuarterTurn,
   WatermarkConfig,
 } from '../domain/document'
+import type { SavedSignature } from '../domain/preferences'
 import { sampleOverlayPixels, type SampledAppearance } from '../pdf/pageSample'
 import { AnnotationLayer, type AnnotationTool } from './AnnotationLayer'
 
@@ -39,6 +40,8 @@ interface PdfCanvasProps {
     event: React.MouseEvent<HTMLDivElement>,
     overlayId: string,
   ) => void
+  pendingSignature?: SavedSignature | null
+  onPlaceSignature?: (overlay: PageOverlay) => void
 }
 
 export function PdfCanvas({
@@ -65,6 +68,8 @@ export function PdfCanvas({
   onDisplaySize,
   onPageContextMenu,
   onOverlayContextMenu,
+  pendingSignature,
+  onPlaceSignature,
 }: PdfCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -196,6 +201,8 @@ export function PdfCanvas({
           sampleAppearance={sampleAppearance}
           onPageContextMenu={onPageContextMenu}
           onOverlayContextMenu={onOverlayContextMenu}
+          pendingSignature={pendingSignature}
+          onPlaceSignature={onPlaceSignature}
         />
       )}
     </div>

@@ -437,8 +437,11 @@ test('draws reversible ink and exports signatures and ink in PNG at every rotati
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('button', { name: 'Type', exact: true }).click()
   await dialog.getByLabel('Your name').fill('Renée — Smith')
-  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog).toBeHidden()
+  const signLayer = page.locator('.focused-page .annotation-layer')
+  const signBounds = (await signLayer.boundingBox())!
+  await signLayer.click({ position: { x: signBounds.width * 0.5, y: signBounds.height * 0.72 } })
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
   await page.getByRole('button', { name: 'signature annotation' }).click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Duplicate annotation' }).click()
@@ -480,7 +483,7 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('button', { name: 'Type', exact: true }).click()
   await dialog.getByLabel('Your name').fill('世界')
-  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await dialog.getByRole('button', { name: 'Apply signature' }).click()
   await expect(dialog.getByRole('alert')).toContainText('Unsupported text')
   await dialog.getByRole('button', { name: 'Draw', exact: true }).click()
   const bounds = (await dialog.locator('canvas').boundingBox())!
@@ -488,13 +491,17 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
   await page.mouse.down()
   await page.mouse.move(bounds.x + 150, bounds.y + 90, { steps: 10 })
   await page.mouse.up()
-  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await dialog.getByRole('button', { name: 'Apply signature' }).click()
+  const signLayer = page.locator('.focused-page .annotation-layer')
+  const signBounds = (await signLayer.boundingBox())!
+  await signLayer.click({ position: { x: signBounds.width * 0.45, y: signBounds.height * 0.7 } })
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
   await page.getByRole('button', { name: 'Signature', exact: true }).click()
   await dialog.getByRole('button', { name: 'Upload', exact: true }).click()
   await dialog.locator('input[type=file]').setInputFiles({ name: 'signature.png', mimeType: 'image/png',
     buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') })
-  await dialog.getByRole('button', { name: 'Insert signature' }).click()
+  await dialog.getByRole('button', { name: 'Apply signature' }).click()
+  await signLayer.click({ position: { x: signBounds.width * 0.55, y: signBounds.height * 0.75 } })
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
 })
 

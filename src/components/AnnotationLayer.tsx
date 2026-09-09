@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { OverlayType, PageOverlay } from '../domain/document'
+import type { SavedSignature } from '../domain/preferences'
+import { createSignatureOverlay } from '../pdf/signatureImage'
 import { normalizeOverlay } from '../domain/document'
 import {
   applyLineEndpoints,
@@ -69,6 +71,8 @@ interface AnnotationLayerProps {
     event: React.MouseEvent<HTMLDivElement>,
     overlayId: string,
   ) => void
+  pendingSignature?: SavedSignature | null
+  onPlaceSignature?: (overlay: PageOverlay) => void
 }
 
 interface Gesture {
@@ -1000,6 +1004,8 @@ export function AnnotationLayer({
   sampleAppearance,
   onPageContextMenu,
   onOverlayContextMenu,
+  pendingSignature = null,
+  onPlaceSignature,
 }: AnnotationLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
@@ -1022,7 +1028,18 @@ export function AnnotationLayer({
   const eraserRef = useRef<{ pointerId: number; erased: Set<string> } | null>(null)
   const activePointerIdRef = useRef<number | null>(null)
   const [hoveredOverlayId, setHoveredOverlayId] = useState<string | null>(null)
+  const [signatureCursor, setSignatureCursor] = useState<PagePoint | null>(null)
   const [seenOverlayIds] = useState(() => new Set(overlays.map((overlay) => overlay.id)))
+  const pageAspect = width > 0 && height > 0 ? width / height : 1
+  const signatureGhost =
+    pendingSignature && signatureCursor
+      ? createSignatureOverlay(
+          pendingSignature.imageData,
+          pendingSignature.ratio,
+          signatureCursor,
+          pageAspect,
+        )
+      : null
 
   useEffect(() => {
     for (const overlay of overlays) {
@@ -1462,13 +1479,36 @@ export function AnnotationLayer({
   return (
     <div
       ref={layerRef}
-      className={`annotation-layer ${interactive ? 'is-interactive' : ''} tool-${tool}${hoveredOverlayId ? ' is-over-mark' : ''}`}
+      className={`annotation-layer ${interactive ? 'is-interactive' : ''} tool-${tool}${hoveredOverlayId ? ' is-over-mark' : ''}${pendingSignature ? ' is-placing-signature' : ''}`}
+      onPointerMove={(event) => {
+        if (!interactive || !pendingSignature) return
+        if (event.target !== event.currentTarget) {
+          setSignatureCursor(null)
+          return
+        }
+        setSignatureCursor(pointerPoint(event))
+      }}
+      onPointerLeave={() => {
+        setSignatureCursor(null)
+      }}
       onPointerDown={(event) => {
         if (!interactive || event.button !== 0) return
         if (!event.isPrimary) return
         const onLayer = event.target === event.currentTarget
         const point = pointerPoint(event)
         const size = layerSize()
+        if (pendingSignature && onLayer) {
+          event.stopPropagation()
+          onPlaceSignature?.(
+            createSignatureOverlay(
+              pendingSignature.imageData,
+              pendingSignature.ratio,
+              point,
+              pageAspect,
+            ),
+          )
+          return
+        }
         if (tool === 'image') return
         if (tool === 'eraser') {
           eraserRef.current = { pointerId: event.pointerId, erased: new Set() }
@@ -1640,6 +1680,15 @@ export function AnnotationLayer({
             pageWidth={width}
             pageHeight={height}
           />
+        </div>
+      )}
+      {signatureGhost && (
+        <div
+          className="annotation annotation-image signature-ghost is-draft"
+          style={overlayStyle(signatureGhost, renderScale)}
+          aria-hidden="true"
+        >
+          <img className="annotation-image" src={signatureGhost.imageData} alt="" draggable={false} />
         </div>
       )}
     </div>

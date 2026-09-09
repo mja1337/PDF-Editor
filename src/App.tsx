@@ -77,7 +77,7 @@ import {
 } from './domain/document'
 import type { OverlayType, PageOverlay } from './domain/document'
 import { createDefaultOverlay, isClosedDrawShape, withSketchStyle } from './domain/overlays'
-import { loadPreferences, savePreferences } from './domain/preferences'
+import { loadPreferences, savePreferences, type SavedSignature } from './domain/preferences'
 import { platformOcrAvailable } from './pdf/ocr'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
@@ -335,6 +335,7 @@ export function App() {
   const [overlayClipboard, setOverlayClipboard] = useState<PageOverlay | null>(null)
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(null)
   const [signatureOpen, setSignatureOpen] = useState(false)
+  const [pendingSignature, setPendingSignature] = useState<SavedSignature | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ocrPromptOpen, setOcrPromptOpen] = useState(false)
   const [inkWidth, setInkWidth] = useState(2)
@@ -817,6 +818,19 @@ export function App() {
     [selectedPage],
   )
 
+  const placeSignature = useCallback(
+    (overlay: PageOverlay) => {
+      addOverlay(overlay)
+    },
+    [addOverlay],
+  )
+
+  const applySignature = useCallback((signature: SavedSignature) => {
+    setPendingSignature(signature)
+    setAnnotationTool('select')
+    setSelectedOverlayId(null)
+  }, [])
+
   const chooseAnnotationTool = useCallback(
     (tool: AnnotationTool) => {
       setAnnotationTool(tool)
@@ -1296,6 +1310,10 @@ export function App() {
       if (editable) return
 
       if (event.key === 'Escape') {
+        if (pendingSignature) {
+          setPendingSignature(null)
+          return
+        }
         setAnnotationTool('select')
         setSelectedOverlayId(null)
       } else if (command && key === 'c' && selectedOverlay) {
@@ -1348,6 +1366,7 @@ export function App() {
     selectedOverlay,
     selectedPage,
     signatureOpen,
+    pendingSignature,
   ])
 
   const openFilePicker = () => fileInputRef.current?.click()
@@ -1845,6 +1864,8 @@ export function App() {
                         overlayId,
                       })
                     }}
+                    pendingSignature={pendingSignature}
+                    onPlaceSignature={placeSignature}
                   />
                 </div>
                 <span className="page-position">
@@ -2024,13 +2045,19 @@ export function App() {
                   )}
                 </div>
               )}
-              {(() => {
-                const hint = annotationHint(
-                  annotationTool,
-                  Boolean(selectedPage?.overlays.some((overlay) => overlay.extracted)),
-                )
-                return hint ? <p className="tool-hint">{hint}</p> : null
-              })()}
+              {pendingSignature ? (
+                <p className="tool-hint">
+                  Click the page to place your signature. Sign another page the same way, or press Escape to finish.
+                </p>
+              ) : (
+                (() => {
+                  const hint = annotationHint(
+                    annotationTool,
+                    Boolean(selectedPage?.overlays.some((overlay) => overlay.extracted)),
+                  )
+                  return hint ? <p className="tool-hint">{hint}</p> : null
+                })()
+              )}
             </section>
 
             {selectedOverlay && (
@@ -2399,14 +2426,7 @@ export function App() {
             savePreferences({ ...loadPreferences(), signature })
           }}
           onClose={() => setSignatureOpen(false)}
-          onInsert={(overlay) => {
-            const canvas = stageRef.current?.querySelector('canvas')
-            const bounds = canvas?.getBoundingClientRect()
-            addOverlay({
-              ...overlay,
-              height: Math.min(0.8, overlay.height * (bounds ? bounds.width / bounds.height : 1)),
-            })
-          }}
+          onApply={applySignature}
         />
       )}
 
