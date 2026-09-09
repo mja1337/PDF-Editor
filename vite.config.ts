@@ -9,7 +9,13 @@ import { defineConfig } from 'vitest/config'
 import type { Plugin } from 'vite'
 import { rewriteTesseractWorkerSource } from './src/pdf/ocrWorkerSource.ts'
 
-const repositoryBase = process.env.BASE_PATH ?? '/'
+function normalizeBasePath(base: string) {
+  if (!base || base === '/') return '/'
+  return base.endsWith('/') ? base : `${base}/`
+}
+
+const repositoryBase = normalizeBasePath(process.env.BASE_PATH ?? '/')
+const escapedBase = repositoryBase.replace(/\//g, '\\/')
 const require = createRequire(import.meta.url)
 const PDFJS_ROOT = dirname(require.resolve('pdfjs-dist/package.json'))
 const PDFJS_FOLDERS = ['cmaps', 'standard_fonts', 'wasm', 'iccs'] as const
@@ -229,6 +235,7 @@ export default defineConfig({
     pdfjsAssetsPlugin(),
     ocrAssetsPlugin(),
     VitePWA({
+      base: repositoryBase,
       registerType: 'prompt',
       includeAssets: ['icon.svg'],
       manifest: {
@@ -242,7 +249,7 @@ export default defineConfig({
         scope: repositoryBase,
         icons: [
           {
-            src: 'icon.svg',
+            src: `${repositoryBase}icon.svg`.replace(/\/{2,}/g, '/'),
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable',
@@ -250,22 +257,23 @@ export default defineConfig({
         ],
       },
       workbox: {
+        cacheId: 'pdfe-pages-v2',
         globPatterns: [
-          '**/*.{html,js,css,svg,mjs,wasm,woff,woff2,bcmap,pfb,ttf,otf,icc}',
+          '**/*.{html,js,css,svg,mjs,wasm,woff,woff2,bcmap,pfb,ttf,otf,icc,gz}',
         ],
         globIgnores: ['**/ocr/**'],
         navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/\/ocr\//],
+        navigateFallbackDenylist: [new RegExp(`${escapedBase}ocr/`)],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
         runtimeCaching: [
           {
-            urlPattern: /\/ocr\//,
+            urlPattern: new RegExp(`${escapedBase}ocr/`, 'i'),
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'ocr-engine-v3',
+              cacheName: 'ocr-engine-v4',
               networkTimeoutSeconds: 60,
               expiration: {
                 maxEntries: 16,

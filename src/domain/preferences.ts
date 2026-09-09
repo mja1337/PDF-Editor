@@ -5,12 +5,18 @@ const LEGACY_STORAGE_KEY = 'pdf-editor.preferences'
 
 export type OcrConsent = 'unset' | 'accepted' | 'declined'
 
+export interface SavedSignature {
+  imageData: string
+  ratio: number
+}
+
 export interface EditorPreferences {
   stamp: LogoStampConfig | null
   ocrConsent: OcrConsent
+  signature: SavedSignature | null
 }
 
-const emptyPreferences: EditorPreferences = { stamp: null, ocrConsent: 'unset' }
+const emptyPreferences: EditorPreferences = { stamp: null, ocrConsent: 'unset', signature: null }
 
 function isCorner(
   value: unknown,
@@ -45,16 +51,33 @@ function parseOcrConsent(value: unknown): OcrConsent {
   return value === 'accepted' || value === 'declined' ? value : 'unset'
 }
 
+function parseSignature(value: unknown): SavedSignature | null {
+  if (!value || typeof value !== 'object') return null
+  const signature = value as Partial<SavedSignature>
+  if (
+    typeof signature.imageData !== 'string' ||
+    !signature.imageData.startsWith('data:image/') ||
+    typeof signature.ratio !== 'number' ||
+    !Number.isFinite(signature.ratio) ||
+    signature.ratio <= 0
+  ) {
+    return null
+  }
+  return { imageData: signature.imageData, ratio: signature.ratio }
+}
+
 export function parsePreferences(raw: string | null): EditorPreferences {
   if (!raw) return emptyPreferences
   try {
     const parsed = JSON.parse(raw) as {
       stamp?: unknown
       ocrConsent?: unknown
+      signature?: unknown
     }
     return {
       stamp: parseStamp(parsed.stamp),
       ocrConsent: parseOcrConsent(parsed.ocrConsent),
+      signature: parseSignature(parsed.signature),
     }
   } catch {
     return emptyPreferences

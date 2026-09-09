@@ -1619,6 +1619,10 @@ input:focus-visible,
 .signature-dialog input { padding: 10px; max-width: 100%; }
 .signature-dialog button, .mobile-page-actions > button { padding: 8px 12px; border: 1px solid #53665d; border-radius: 7px; background: #293732; color: #eff8f3; cursor: pointer; }
 .signature-dialog button:disabled { opacity: 0.4; }
+.signature-saved { display: grid; gap: 12px; margin: 16px 0; padding: 12px; border: 1px solid #53665d; border-radius: 10px; background: #1a2420; }
+.signature-hint { margin: 0 0 8px; color: #b4c7be; font-size: 0.84rem; }
+.signature-remember { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; color: #b4c7be; font-size: 0.84rem; }
+.signature-remember input { width: auto; }
 .signature-tabs, .signature-actions { display: flex; gap: 10px; margin: 16px 0; }
 .signature-tabs button[aria-pressed='true'], .signature-actions button:last-child { background: #147d72; }
 .signature-name { display: block; padding: 18px; overflow-wrap: anywhere; font: 700 28px 'Noto Sans', sans-serif; color: #172a46; background: white; }

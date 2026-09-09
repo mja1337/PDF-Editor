@@ -435,6 +435,7 @@ test('draws reversible ink and exports signatures and ink in PNG at every rotati
 
   await page.getByRole('button', { name: 'Signature', exact: true }).click()
   const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Type', exact: true }).click()
   await dialog.getByLabel('Your name').fill('Renée — Smith')
   await dialog.getByRole('button', { name: 'Insert signature' }).click()
   await expect(dialog).toBeHidden()
@@ -477,6 +478,7 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
   })
   await page.getByRole('button', { name: 'Signature', exact: true }).click()
   const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Type', exact: true }).click()
   await dialog.getByLabel('Your name').fill('世界')
   await dialog.getByRole('button', { name: 'Insert signature' }).click()
   await expect(dialog.getByRole('alert')).toContainText('Unsupported text')

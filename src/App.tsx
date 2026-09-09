@@ -812,7 +812,7 @@ export function App() {
       if (!selectedPage) return
       dispatch({ type: 'addOverlay', pageId: selectedPage.id, overlay })
       setSelectedOverlayId(overlay.id)
-      if (overlay.type === 'text') setAnnotationTool('select')
+      if (overlay.type === 'text' || overlay.signature) setAnnotationTool('select')
     },
     [selectedPage],
   )
@@ -2392,13 +2392,23 @@ export function App() {
           }}
         />
       )}
-      {signatureOpen && selectedPage && <SignatureDialog
-        onClose={() => setSignatureOpen(false)}
-        onInsert={(overlay) => {
-          const canvas = stageRef.current?.querySelector('canvas')
-          const bounds = canvas?.getBoundingClientRect()
-          addOverlay({ ...overlay, height: Math.min(0.8, overlay.height * (bounds ? bounds.width / bounds.height : 1)) })
-        }} />}
+      {signatureOpen && selectedPage && (
+        <SignatureDialog
+          savedSignature={loadPreferences().signature}
+          onSaveSignature={(signature) => {
+            savePreferences({ ...loadPreferences(), signature })
+          }}
+          onClose={() => setSignatureOpen(false)}
+          onInsert={(overlay) => {
+            const canvas = stageRef.current?.querySelector('canvas')
+            const bounds = canvas?.getBoundingClientRect()
+            addOverlay({
+              ...overlay,
+              height: Math.min(0.8, overlay.height * (bounds ? bounds.width / bounds.height : 1)),
+            })
+          }}
+        />
+      )}
 
       {contextTarget && (
         <ContextMenu
