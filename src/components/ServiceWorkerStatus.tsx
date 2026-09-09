@@ -5,7 +5,11 @@ export function ServiceWorkerStatus() {
     offlineReady: [offlineReady, setOfflineReady],
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
-  } = useRegisterSW()
+  } = useRegisterSW({
+    onRegisteredSW(_swUrl, registration) {
+      registration?.update()
+    },
+  })
 
   if (!offlineReady && !needRefresh) return null
 
@@ -16,13 +20,13 @@ export function ServiceWorkerStatus() {
         <span>
           {offlineReady
             ? 'The editor can now open without a network connection.'
-            : 'Reload when you are ready to use the latest version.'}
+            : 'A newer version is downloading. The page will reload automatically when it is ready.'}
         </span>
       </div>
       <div className="update-actions">
         {needRefresh && (
           <button type="button" onClick={() => void updateServiceWorker(true)}>
-            Reload
+            Reload now
           </button>
         )}
         <button

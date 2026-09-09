@@ -102,7 +102,10 @@ function userFacingError(error: unknown, fallback: string) {
     error instanceof TypeError &&
     /Failed to fetch dynamically imported module/i.test(error.message)
   ) {
-    return 'The editor lost its connection to the local app. Refresh the page. If that does not help, restart npm run dev.'
+    if (import.meta.env.DEV) {
+      return 'The editor lost its connection to the local app. Refresh the page. If that does not help, restart npm run dev.'
+    }
+    return 'The editor could not load a required module. Hard-refresh the page (Ctrl+Shift+R or Cmd+Shift+R) to clear stale cache, then try again.'
   }
   return error instanceof Error ? error.message : fallback
 }

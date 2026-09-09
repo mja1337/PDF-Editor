@@ -218,7 +218,8 @@ function readLegacyLocalStorage(): {
   return null
 }
 
-function clearLegacyLocalStorage() {
+/** Drop oversized legacy preference blobs that predate IndexedDB storage. */
+export function purgeLegacyLocalStorage() {
   if (typeof localStorage === 'undefined') return
   for (const key of LEGACY_STORAGE_KEYS) {
     try {
@@ -261,7 +262,7 @@ async function migrateLegacyLocalStorage(): Promise<void> {
     await writeAsset(STAMP_IMAGE_KEY, legacy.stamp.imageData)
   }
 
-  clearLegacyLocalStorage()
+  purgeLegacyLocalStorage()
 }
 
 async function mergeStamp(

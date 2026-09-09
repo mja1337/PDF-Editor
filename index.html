@@ -19,6 +19,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      try {
+        ;['pdfe.preferences', 'pdf-editor.preferences'].forEach(function (key) {
+          localStorage.removeItem(key)
+        })
+      } catch (_error) {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

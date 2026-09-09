@@ -236,7 +236,7 @@ export default defineConfig({
     ocrAssetsPlugin(),
     VitePWA({
       base: repositoryBase,
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       includeAssets: ['icon.svg'],
       manifest: {
         name: 'pdfe',
@@ -257,12 +257,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        cacheId: 'pdfe-pages-v2',
+        cacheId: 'pdfe-pages-v3',
         globPatterns: [
           '**/*.{html,js,css,svg,mjs,wasm,woff,woff2,bcmap,pfb,ttf,otf,icc,gz}',
         ],
         globIgnores: ['**/ocr/**'],
-        navigateFallback: 'index.html',
+        navigateFallback: `${repositoryBase}index.html`.replace(/\/{2,}/g, '/'),
         navigateFallbackDenylist: [new RegExp(`${escapedBase}ocr/`)],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
@@ -273,7 +273,7 @@ export default defineConfig({
             urlPattern: new RegExp(`${escapedBase}ocr/`, 'i'),
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'ocr-engine-v4',
+              cacheName: 'ocr-engine-v5',
               networkTimeoutSeconds: 60,
               expiration: {
                 maxEntries: 16,

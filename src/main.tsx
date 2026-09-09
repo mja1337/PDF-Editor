@@ -1,7 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { purgeLegacyLocalStorage } from './domain/appStorage'
 import './styles.css'
+
+purgeLegacyLocalStorage()
 import '@fontsource/noto-sans/latin-400.css'
 import '@fontsource/noto-sans/latin-400-italic.css'
 import '@fontsource/noto-sans/latin-700.css'
