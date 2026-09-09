@@ -20,5 +20,8 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    env: {
+      BASE_PATH: process.env.BASE_PATH ?? '/',
+    },
   },
 })

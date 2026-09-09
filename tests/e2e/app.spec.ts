@@ -492,15 +492,30 @@ test('creates drawn and uploaded signatures and reports unsupported text', async
   await page.mouse.move(bounds.x + 150, bounds.y + 90, { steps: 10 })
   await page.mouse.up()
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
+  await expect(dialog).toBeHidden()
   const signLayer = page.locator('.focused-page .annotation-layer')
+  await expect(signLayer).toHaveClass(/is-placing-signature/)
   const signBounds = (await signLayer.boundingBox())!
   await signLayer.click({ position: { x: signBounds.width * 0.45, y: signBounds.height * 0.7 } })
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(signLayer).not.toHaveClass(/is-placing-signature/)
   await page.getByRole('button', { name: 'Signature', exact: true }).click()
+  await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Upload', exact: true }).click()
-  await dialog.locator('input[type=file]').setInputFiles({ name: 'signature.png', mimeType: 'image/png',
-    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') })
+  await dialog.locator('input[type=file]').setInputFiles({
+    name: 'signature.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  })
+  await expect(dialog.locator('.signature-upload-preview')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Apply signature' })).toBeEnabled()
   await dialog.getByRole('button', { name: 'Apply signature' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(signLayer).toHaveClass(/is-placing-signature/)
   await signLayer.click({ position: { x: signBounds.width * 0.55, y: signBounds.height * 0.75 } })
   await expect(page.getByRole('button', { name: 'signature annotation' })).toHaveCount(2)
 })
