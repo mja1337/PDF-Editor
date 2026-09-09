@@ -809,6 +809,12 @@ input:focus-visible,
   cursor: text;
 }
 
+.annotation-layer.is-interactive.tool-highlight .annotation-extracted:not(.is-edited),
+.annotation-layer.is-interactive.tool-underline .annotation-extracted:not(.is-edited),
+.annotation-layer.is-interactive.tool-strikeout .annotation-extracted:not(.is-edited) {
+  pointer-events: none;
+}
+
 .annotation.is-selected {
   z-index: 4;
   outline: none;

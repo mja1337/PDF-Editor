@@ -317,7 +317,11 @@ test('creates, edits, moves, resizes, and exports annotations', async ({ page })
   expect(afterZoom!.width).toBeGreaterThan(afterResize!.width)
 
   await page.getByRole('button', { name: 'Box', exact: true }).click()
-  await layer.click({ position: { x: 230, y: 260 } })
+  const boxLayer = (await layer.boundingBox())!
+  await page.mouse.move(boxLayer.x + 36, boxLayer.y + 250)
+  await page.mouse.down()
+  await page.mouse.move(boxLayer.x + 150, boxLayer.y + 340, { steps: 8 })
+  await page.mouse.up()
   const rectangle = page.getByRole('button', { name: 'rectangle annotation' })
   await expect(rectangle).toBeVisible()
   await expect(page.getByRole('button', { name: 'Box', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -397,7 +401,7 @@ test('shows relevant context actions for pages, canvas, and annotations', async 
 
   await rectangles.last().click({ button: 'right' })
   await annotationMenu.getByRole('menuitem', { name: 'Send to back' }).click()
-  await rectangles.last().click({ button: 'right' })
+  await page.locator('.focused-page .annotation-rectangle.is-selected').click({ button: 'right' })
   await annotationMenu.getByRole('menuitem', { name: 'Delete annotation' }).click()
   await expect(rectangles).toHaveCount(1)
 })

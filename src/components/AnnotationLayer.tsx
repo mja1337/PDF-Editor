@@ -111,6 +111,15 @@ function toolCanGrabMarks(tool: AnnotationTool) {
   return tool !== 'eraser' && tool !== 'image'
 }
 
+function isLineMarkTool(tool: AnnotationTool) {
+  return tool === 'highlight' || tool === 'underline' || tool === 'strikeout'
+}
+
+function overlayCanStartMove(tool: AnnotationTool, overlay: PageOverlay) {
+  if (isLineMarkTool(tool) && overlay.extracted && !overlay.edited) return false
+  return toolCanGrabMarks(tool)
+}
+
 function snap(value: number) {
   return Math.round(value * 200) / 200
 }
@@ -892,6 +901,7 @@ function OverlayItem({
       }}
       onPointerDown={(event) => {
         if (editing) return
+        if (!overlayCanStartMove(tool, overlay)) return
         onBeginMove(event, overlay)
       }}
       onKeyDown={(event) => {
@@ -1462,13 +1472,13 @@ export function AnnotationLayer({
         }
         if (onLayer && toolCanGrabMarks(tool)) {
           const hit = topmostOverlayAt(overlays, point, size.width, size.height)
-          if (hit) {
+          if (hit && overlayCanStartMove(tool, hit)) {
             beginMoveOverlay(event, hit)
             return
           }
         }
-        if (!onLayer) return
         if (tool === 'ink') {
+          if (!onLayer) return
           const start = pointerPoint(event)
           inkRef.current = { pointerId: event.pointerId, points: [start] }
           setInkDraft(liveInkOverlay([start], color, strokeWidth))
@@ -1480,13 +1490,14 @@ export function AnnotationLayer({
           return
         }
         if (tool === 'select') {
+          if (!onLayer) return
           onSelect?.(null)
           setEditSession(null)
           setHoveredOverlayId(null)
           return
         }
         if (!DRAW_TOOLS.has(tool)) return
-        if (tool === 'highlight' || tool === 'underline' || tool === 'strikeout') {
+        if (isLineMarkTool(tool)) {
           const line = hitExtractedLine(overlays, point.x, point.y)
           if (line) {
             const existing = matchingLineMark(overlays, tool, line)
@@ -1495,6 +1506,7 @@ export function AnnotationLayer({
             return
           }
         }
+        if (!onLayer) return
         createRef.current = {
           pointerId: event.pointerId,
           tool: tool as CreateSession['tool'],
