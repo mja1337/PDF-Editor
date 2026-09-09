@@ -13,7 +13,7 @@ import {
 } from './coordinates'
 import { stampDisplayRect } from './stamp'
 import { overlayPadPx, wrapTextToWidth } from './textLayout'
-import { arrowHeadPolygon, arrowHeadSize, isLinearOverlay, lineEndpoints, lineSketchRoughness, overlayDisplayPoint } from './shapeGeometry'
+import { arrowHeadPolygon, arrowHeadSize, lineEndpoints, lineSketchRoughness, overlayDisplayPoint } from './shapeGeometry'
 import { sketchClosedInPixels, sketchLineBetween, sketchStrokes } from './sketch'
 import { closedShapeFill, isClosedDrawShape } from '../domain/overlays'
 import {
