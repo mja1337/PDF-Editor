@@ -519,8 +519,9 @@ function clamp(value: number, minimum: number, maximum: number) {
 }
 
 export function normalizeOverlay(overlay: PageOverlay): PageOverlay {
-  const width = clamp(overlay.width, 0.01, 1)
-  const height = clamp(overlay.height, 0.01, 1)
+  const minSize = overlay.type === 'ink' ? 0.0005 : 0.01
+  const width = clamp(overlay.width, minSize, 1)
+  const height = clamp(overlay.height, minSize, 1)
   return {
     ...overlay,
     x: clamp(overlay.x, 0, 1 - width),

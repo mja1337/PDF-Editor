@@ -14,9 +14,8 @@ import {
 import { stampDisplayRect } from './stamp'
 import { overlayPadPx, wrapTextToWidth } from './textLayout'
 import { arrowHeadPolygon, arrowHeadSize, isLinearOverlay, lineEndpoints, lineSketchRoughness, overlayDisplayPoint } from './shapeGeometry'
-import { sketchLineBetween, sketchStrokes } from './sketch'
-import { closedShapeFill } from '../domain/overlays'
-import { archOffset } from './wordArt'
+import { sketchClosedInPixels, sketchLineBetween, sketchStrokes } from './sketch'
+import { closedShapeFill, isClosedDrawShape } from '../domain/overlays'
 import {
   canFlattenScanEdits,
   coverBox,
@@ -239,11 +238,20 @@ export async function exportPdf(
           y: (overlay.y + overlay.height) * display.height }, pageWidth, pageHeight, quarterTurn)
         page.drawImage(image, { ...anchor, width: overlay.width * display.width,
           height: overlay.height * display.height, rotate: degrees(rotation), opacity: overlay.opacity })
-      } else if (
-        (overlay.type === 'ink' || overlay.sketch) &&
-        (overlay.points?.length ?? 0) > 1 &&
-        !isLinearOverlay(overlay.type)
-      ) {
+      } else if (overlay.type === 'ink' && (overlay.points?.length ?? 0) > 1) {
+        const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
+        const sourcePoints = overlay.points ?? []
+        const points = sourcePoints.map((point) => displayPointToPdf({
+          x: (overlay.x + point.x * overlay.width) * display.width,
+          y: (overlay.y + point.y * overlay.height) * display.height,
+        }, pageWidth, pageHeight, quarterTurn))
+        for (let index = 1; index < points.length; index += 1) {
+          if (sourcePoints[index]?.move) continue
+          page.drawLine({ start: points[index - 1], end: points[index],
+            thickness: overlay.strokeWidth, color, opacity: overlay.opacity,
+            lineCap: LineCapStyle.Round })
+        }
+      } else if (overlay.sketch && isClosedDrawShape(overlay.type)) {
         const fillHex = closedShapeFill(overlay)
         if (fillHex) {
           const [fillRed, fillGreen, fillBlue] = colorComponents(fillHex)
@@ -267,10 +275,16 @@ export async function exportPdf(
           }
         }
         const display = displayDimensions(pageWidth, pageHeight, quarterTurn)
-        const sourcePoints = overlay.points ?? []
+        const sourcePoints = sketchClosedInPixels(
+          overlay.type,
+          overlay.sketchSeed ?? 1,
+          overlay.width * display.width,
+          overlay.height * display.height,
+          overlay.strokeWidth,
+        )
         const points = sourcePoints.map((point) => displayPointToPdf({
-          x: (overlay.x + point.x * overlay.width) * display.width,
-          y: (overlay.y + point.y * overlay.height) * display.height,
+          x: overlay.x * display.width + point.x,
+          y: overlay.y * display.height + point.y,
         }, pageWidth, pageHeight, quarterTurn))
         for (let index = 1; index < points.length; index += 1) {
           if (sourcePoints[index]?.move) continue
@@ -337,62 +351,7 @@ export async function exportPdf(
               rotate: degrees(rotation),
             })
           }
-          const art = overlay.wordArt ?? 'plain'
-          if (art === 'shadow') {
-            drawAt(baseX + fontSize * 0.08, baseY + fontSize * 0.08, rgb(0.12, 0.12, 0.12))
-            drawAt(baseX, baseY)
-          } else if (art === 'outline') {
-            const offset = Math.max(0.6, fontSize * 0.06)
-            for (const [dx, dy] of [
-              [-offset, 0],
-              [offset, 0],
-              [0, -offset],
-              [0, offset],
-              [-offset, -offset],
-              [offset, offset],
-            ]) {
-              drawAt(baseX + dx, baseY + dy)
-            }
-            drawAt(baseX, baseY, rgb(1, 1, 1))
-          } else if (art === 'stack') {
-            for (let layer = 3; layer >= 1; layer -= 1) {
-              drawAt(
-                baseX + layer * fontSize * 0.06,
-                baseY + layer * fontSize * 0.06,
-                rgb(0.12, 0.12, 0.12),
-              )
-            }
-            drawAt(baseX, baseY)
-          } else if (art === 'arch') {
-            let cursor = 0
-            const letters = [...line]
-            for (let letterIndex = 0; letterIndex < letters.length; letterIndex += 1) {
-              const letter = letters[letterIndex]
-              const offset = archOffset(letterIndex, letters.length)
-              const width = font.widthOfTextAtSize(letter, fontSize)
-              const anchor = displayPointToPdf(
-                {
-                  x: baseX + cursor + width / 2,
-                  y: baseY + offset.y * fontSize,
-                },
-                pageWidth,
-                pageHeight,
-                quarterTurn,
-              )
-              page.drawText(letter, {
-                x: anchor.x,
-                y: anchor.y,
-                size: fontSize,
-                font,
-                color,
-                opacity: overlay.opacity,
-                rotate: degrees(rotation + offset.rotate),
-              })
-              cursor += width
-            }
-          } else {
-            drawAt(baseX, baseY)
-          }
+          drawAt(baseX, baseY)
         }
       } else if (overlay.type === 'highlight') {
         page.drawRectangle({

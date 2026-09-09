@@ -266,10 +266,32 @@ export function overlayHitsPoint(
   }
   const padX = paddingPx / pageWidth
   const padY = paddingPx / pageHeight
+  const nx =
+    (point.x - (overlay.x + overlay.width / 2)) / Math.max(overlay.width / 2 + padX, 0.001)
+  const ny =
+    (point.y - (overlay.y + overlay.height / 2)) / Math.max(overlay.height / 2 + padY, 0.001)
+  if (overlay.type === 'ellipse') return nx * nx + ny * ny <= 1
+  if (overlay.type === 'diamond') return Math.abs(nx) + Math.abs(ny) <= 1
   return (
     point.x >= overlay.x - padX &&
     point.x <= overlay.x + overlay.width + padX &&
     point.y >= overlay.y - padY &&
     point.y <= overlay.y + overlay.height + padY
   )
+}
+
+export function topmostOverlayAt(
+  overlays: PageOverlay[],
+  point: PagePoint,
+  pageWidth: number,
+  pageHeight: number,
+  options?: { includeExtracted?: boolean },
+) {
+  for (let index = overlays.length - 1; index >= 0; index -= 1) {
+    const overlay = overlays[index]
+    if (!overlay) continue
+    if (overlay.extracted && !overlay.edited && !options?.includeExtracted) continue
+    if (overlayHitsPoint(overlay, point, pageWidth, pageHeight)) return overlay
+  }
+  return null
 }

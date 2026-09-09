@@ -106,8 +106,12 @@ export function fitOverlayToText(
   const fontPx = overlayFontPx(overlay, renderScale)
   const lineHeightPx = fontPx * (overlay.extracted ? 1 : 1.15)
   const pad = overlayPadPx(overlay, renderScale)
-  const minWidthPx = overlay.width * pageWidth
-  const minHeightPx = overlay.height * pageHeight
+  const minWidthPx = overlay.extracted
+    ? overlay.width * pageWidth
+    : fontPx * 0.35 + pad.x * 2
+  const minHeightPx = overlay.extracted
+    ? overlay.height * pageHeight
+    : lineHeightPx + pad.y * 2
   const maxWidthPx = Math.max(
     minWidthPx,
     (1 - PAGE_EDGE_MARGIN - overlay.x) * pageWidth,

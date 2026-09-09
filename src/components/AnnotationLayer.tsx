@@ -6,6 +6,7 @@ import {
   createDefaultOverlay,
   createDrawnOverlay,
   createInkOverlay,
+  liveInkOverlay,
   createLineMark,
   hitExtractedLine,
   isClosedDrawShape,
@@ -26,11 +27,12 @@ import {
   lineSketchRoughness,
   overlayHitsPoint,
   resizeOverlayBox,
+  topmostOverlayAt,
   type BoxHandle,
   type LineHandle,
   type PagePoint,
 } from '../pdf/shapeGeometry'
-import { sketchLineBetween, sketchStrokes } from '../pdf/sketch'
+import { sketchClosedInPixels, sketchLineBetween, sketchStrokes } from '../pdf/sketch'
 import {
   caretIndexAtX,
   createCanvasMeasurer,
@@ -40,9 +42,8 @@ import {
   overlayFontPx,
   overlayPadPx,
 } from '../pdf/textLayout'
-import { archOffset } from '../pdf/wordArt'
 
-export type AnnotationTool = 'select' | 'eraser' | 'wordArt' | OverlayType
+export type AnnotationTool = 'select' | 'eraser' | OverlayType
 
 interface AnnotationLayerProps {
   width: number
@@ -92,9 +93,10 @@ interface CreateSession {
 }
 
 const DRAG_THRESHOLD = 6
+type ShapeEmphasis = 'none' | 'hover' | 'selected'
+
 const DRAW_TOOLS = new Set<AnnotationTool>([
   'text',
-  'wordArt',
   'highlight',
   'underline',
   'strikeout',
@@ -104,6 +106,10 @@ const DRAW_TOOLS = new Set<AnnotationTool>([
   'arrow',
   'diamond',
 ])
+
+function toolCanGrabMarks(tool: AnnotationTool) {
+  return tool !== 'eraser' && tool !== 'image'
+}
 
 function snap(value: number) {
   return Math.round(value * 200) / 200
@@ -124,11 +130,13 @@ function LinearShape({
   pageWidth,
   pageHeight,
   renderScale,
+  emphasis = 'none',
 }: {
   overlay: PageOverlay
   pageWidth: number
   pageHeight: number
   renderScale: number
+  emphasis?: ShapeEmphasis
 }) {
   const [start, end] = lineEndpoints(overlay)
   const width = Math.max(1, overlay.width * pageWidth)
@@ -199,6 +207,17 @@ function LinearShape({
             vectorEffect="non-scaling-stroke"
           />
         )}
+      {emphasis !== 'none' ? (
+        <line
+          className={emphasis === 'selected' ? 'annotation-selection-edge' : 'annotation-hover-edge'}
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
       {head ? (
         <polygon
           points={`${head.left.x},${head.left.y} ${head.tip.x},${head.tip.y} ${head.right.x},${head.right.y}`}
@@ -268,12 +287,35 @@ function commitText(overlay: PageOverlay, value: string) {
   return value.trim() || 'Add text'
 }
 
-function SketchPath({ overlay, renderScale }: { overlay: PageOverlay; renderScale: number }) {
+function SketchPath({
+  overlay,
+  renderScale,
+  emphasis = 'none',
+}: {
+  overlay: PageOverlay
+  renderScale: number
+  emphasis?: ShapeEmphasis
+}) {
   const strokes = sketchStrokes(overlay.points ?? [])
   if (strokes.every((stroke) => stroke.length < 2)) return null
   const strokeWidth = overlay.strokeWidth * renderScale
   return (
     <svg className="annotation-line annotation-sketch" viewBox="0 0 1 1" preserveAspectRatio="none">
+      {strokes.map((stroke, index) =>
+        stroke.length < 2 ? null : (
+          <polyline
+            key={`hit-${index}`}
+            className="annotation-hit-stroke"
+            points={stroke.map((point) => `${point.x},${point.y}`).join(' ')}
+            fill="none"
+            stroke="transparent"
+            strokeWidth={Math.max(16, strokeWidth * 5)}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ),
+      )}
       {strokes.map((stroke, index) =>
         stroke.length < 2 ? null : (
           <polyline
@@ -288,48 +330,151 @@ function SketchPath({ overlay, renderScale }: { overlay: PageOverlay; renderScal
           />
         ),
       )}
+      {emphasis !== 'none'
+        ? strokes.map((stroke, index) =>
+            stroke.length < 2 ? null : (
+              <polyline
+                key={`emphasis-${index}`}
+                className={emphasis === 'selected' ? 'annotation-selection-edge' : 'annotation-hover-edge'}
+                points={stroke.map((point) => `${point.x},${point.y}`).join(' ')}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            ),
+          )
+        : null}
     </svg>
   )
 }
 
-function ClosedShape({ overlay, renderScale }: { overlay: PageOverlay; renderScale: number }) {
-  const stroke = Math.max(1, overlay.strokeWidth * renderScale)
-  const inset = 0.045
-  const fill = overlay.backgroundColor
-  const sketch = Boolean(overlay.sketch && overlay.points && overlay.points.length > 1)
-  const strokes = sketch ? sketchStrokes(overlay.points ?? []) : []
-  const showBody = Boolean(fill) || !sketch
+function ClosedGeometry({
+  overlay,
+  width,
+  height,
+  inset,
+  className,
+  fill,
+  stroke,
+  strokeWidth,
+  strokeLinejoin,
+  vectorEffect,
+}: {
+  overlay: PageOverlay
+  width: number
+  height: number
+  inset: number
+  className?: string
+  fill?: string
+  stroke?: string
+  strokeWidth?: number
+  strokeLinejoin?: 'round'
+  vectorEffect?: 'non-scaling-stroke'
+}) {
+  if (overlay.type === 'ellipse') {
+    return (
+      <ellipse
+        cx={width / 2}
+        cy={height / 2}
+        rx={Math.max(0.5, width / 2 - inset)}
+        ry={Math.max(0.5, height / 2 - inset)}
+        className={className}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        vectorEffect={vectorEffect}
+      />
+    )
+  }
+  if (overlay.type === 'diamond') {
+    return (
+      <polygon
+        points={`${width / 2},${inset} ${width - inset},${height / 2} ${width / 2},${height - inset} ${inset},${height / 2}`}
+        className={className}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinejoin={strokeLinejoin}
+        vectorEffect={vectorEffect}
+      />
+    )
+  }
   return (
-    <svg className="annotation-line annotation-closed-shape" viewBox="0 0 1 1" preserveAspectRatio="none">
-      {showBody && overlay.type === 'ellipse' ? (
-        <ellipse
-          cx="0.5"
-          cy="0.5"
-          rx={0.5 - inset}
-          ry={0.5 - inset}
-          fill={fill ?? 'none'}
-          stroke={sketch ? 'none' : overlay.color}
-          strokeWidth={sketch ? 0 : stroke}
-          vectorEffect="non-scaling-stroke"
-        />
-      ) : showBody && overlay.type === 'diamond' ? (
-        <polygon
-          points="0.5,0.04 0.96,0.5 0.5,0.96 0.04,0.5"
+    <rect
+      x={inset}
+      y={inset}
+      width={Math.max(1, width - inset * 2)}
+      height={Math.max(1, height - inset * 2)}
+      className={className}
+      fill={fill}
+      stroke={stroke}
+      strokeWidth={strokeWidth}
+      vectorEffect={vectorEffect}
+    />
+  )
+}
+
+function ClosedShape({
+  overlay,
+  renderScale,
+  pageWidth,
+  pageHeight,
+  emphasis = 'none',
+}: {
+  overlay: PageOverlay
+  renderScale: number
+  pageWidth: number
+  pageHeight: number
+  emphasis?: ShapeEmphasis
+}) {
+  const width = Math.max(1, overlay.width * pageWidth)
+  const height = Math.max(1, overlay.height * pageHeight)
+  const stroke = Math.max(1, overlay.strokeWidth * renderScale)
+  const inset = Math.max(stroke * 0.5, Math.min(width, height) * 0.045)
+  const fill = overlay.backgroundColor
+  const sketch = Boolean(overlay.sketch)
+  const strokes = sketch
+    ? sketchStrokes(
+        sketchClosedInPixels(
+          overlay.type as 'rectangle' | 'ellipse' | 'diamond',
+          overlay.sketchSeed ?? 1,
+          width,
+          height,
+          stroke,
+        ),
+      )
+    : []
+  const showBody = Boolean(fill) || !sketch
+  const hitWidth = Math.max(16, stroke * 5)
+  return (
+    <svg
+      className="annotation-line annotation-closed-shape"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+    >
+      <ClosedGeometry
+        overlay={overlay}
+        width={width}
+        height={height}
+        inset={inset}
+        className="annotation-hit-shape"
+        fill="transparent"
+        stroke="transparent"
+        strokeWidth={hitWidth}
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      {showBody ? (
+        <ClosedGeometry
+          overlay={overlay}
+          width={width}
+          height={height}
+          inset={inset}
           fill={fill ?? 'none'}
           stroke={sketch ? 'none' : overlay.color}
           strokeWidth={sketch ? 0 : stroke}
           strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-      ) : showBody ? (
-        <rect
-          x={inset}
-          y={inset}
-          width={1 - inset * 2}
-          height={1 - inset * 2}
-          fill={fill ?? 'none'}
-          stroke={sketch ? 'none' : overlay.color}
-          strokeWidth={sketch ? 0 : stroke}
           vectorEffect="non-scaling-stroke"
         />
       ) : null}
@@ -347,48 +492,81 @@ function ClosedShape({ overlay, renderScale }: { overlay: PageOverlay; renderSca
           />
         ),
       )}
+      {emphasis !== 'none' ? (
+        <ClosedGeometry
+          overlay={overlay}
+          width={width}
+          height={height}
+          inset={inset}
+          className={emphasis === 'selected' ? 'annotation-selection-edge' : 'annotation-hover-edge'}
+          fill="none"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
     </svg>
   )
 }
 
-function WordArtLabel({ overlay }: { overlay: PageOverlay }) {
-  const text = overlay.extracted && !overlay.edited ? '' : overlay.text || 'Add text'
-  const style = overlay.wordArt ?? 'plain'
-  if (!text) {
-    return <span className="annotation-text" />
-  }
-  if (style === 'arch') {
-    const letters = [...text]
-    return (
-      <span className="annotation-text wordart wordart-arch">
-        {letters.map((letter, index) => {
-          const offset = archOffset(index, letters.length)
-          return (
-            <span
-              key={`${index}-${letter}`}
-              style={{
-                display: 'inline-block',
-                transform: `translateY(${offset.y}em) rotate(${offset.rotate}deg)`,
-              }}
-            >
-              {letter === ' ' ? '\u00a0' : letter}
-            </span>
-          )
-        })}
-      </span>
-    )
-  }
-  if (style === 'stack') {
-    return (
-      <span className="annotation-text wordart wordart-stack">
-        <span className="wordart-stack-back" aria-hidden="true">
-          {text}
-        </span>
-        <span>{text}</span>
-      </span>
-    )
-  }
-  return <span className={`annotation-text wordart wordart-${style}`}>{text}</span>
+function InkShape({
+  overlay,
+  renderScale,
+  pageWidth,
+  pageHeight,
+  emphasis = 'none',
+}: {
+  overlay: PageOverlay
+  renderScale: number
+  pageWidth: number
+  pageHeight: number
+  emphasis?: ShapeEmphasis
+}) {
+  const width = Math.max(1, overlay.width * pageWidth)
+  const height = Math.max(1, overlay.height * pageHeight)
+  const points =
+    overlay.points?.map((point) => `${point.x * width},${point.y * height}`).join(' ') ?? ''
+  const stroke = Math.max(1, overlay.strokeWidth * renderScale)
+  return (
+    <svg
+      className="annotation-line annotation-ink-stroke"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+    >
+      <polyline
+        className="annotation-hit-stroke"
+        points={points}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={Math.max(16, stroke * 5)}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <polyline
+        points={points}
+        fill="none"
+        stroke={overlay.color}
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      {emphasis !== 'none' ? (
+        <polyline
+          className={emphasis === 'selected' ? 'annotation-selection-edge' : 'annotation-hover-edge'}
+          points={points}
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+    </svg>
+  )
+}
+
+function textLabel(overlay: PageOverlay) {
+  if (overlay.extracted && !overlay.edited) return ''
+  return overlay.text || 'Add text'
 }
 
 function OverlayContent({
@@ -396,11 +574,13 @@ function OverlayContent({
   renderScale,
   pageWidth,
   pageHeight,
+  emphasis = 'none',
 }: {
   overlay: PageOverlay
   renderScale: number
   pageWidth: number
   pageHeight: number
+  emphasis?: ShapeEmphasis
 }) {
   if (isLinearOverlay(overlay.type)) {
     return (
@@ -409,34 +589,107 @@ function OverlayContent({
         pageWidth={pageWidth}
         pageHeight={pageHeight}
         renderScale={renderScale}
+        emphasis={emphasis}
       />
     )
   }
   if (overlay.type === 'rectangle' || overlay.type === 'ellipse' || overlay.type === 'diamond') {
-    return <ClosedShape overlay={overlay} renderScale={renderScale} />
+    return (
+      <ClosedShape
+        overlay={overlay}
+        renderScale={renderScale}
+        pageWidth={pageWidth}
+        pageHeight={pageHeight}
+        emphasis={emphasis}
+      />
+    )
   }
   if (overlay.sketch && overlay.points && overlay.points.length > 1) {
-    return <SketchPath overlay={overlay} renderScale={renderScale} />
+    return <SketchPath overlay={overlay} renderScale={renderScale} emphasis={emphasis} />
   }
   switch (overlay.type) {
     case 'image':
-      return <img className="annotation-image" src={overlay.imageData} alt="" draggable={false} />
+      return (
+        <>
+          <img className="annotation-image" src={overlay.imageData} alt="" draggable={false} />
+          {emphasis !== 'none' ? (
+            <svg className="annotation-selection-frame" viewBox="0 0 1 1" preserveAspectRatio="none">
+              <rect
+                x="0.02"
+                y="0.02"
+                width="0.96"
+                height="0.96"
+                className={emphasis === 'selected' ? 'annotation-selection-box' : 'annotation-hover-edge'}
+              />
+            </svg>
+          ) : null}
+        </>
+      )
     case 'ink':
       return (
-        <svg className="annotation-line" viewBox="0 0 1 1" preserveAspectRatio="none">
-          <polyline points={overlay.points?.map(({ x, y }) => `${x},${y}`).join(' ')}
-            fill="none" stroke={overlay.color} strokeWidth={overlay.strokeWidth * renderScale}
-            strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        </svg>
+        <InkShape
+          overlay={overlay}
+          renderScale={renderScale}
+          pageWidth={pageWidth}
+          pageHeight={pageHeight}
+          emphasis={emphasis}
+        />
       )
     case 'text':
-      return <WordArtLabel overlay={overlay} />
+      return (
+        <>
+          <span className="annotation-text">{textLabel(overlay)}</span>
+          {emphasis !== 'none' ? (
+            <svg className="annotation-selection-frame" viewBox="0 0 1 1" preserveAspectRatio="none">
+              <rect
+                x="0.015"
+                y="0.015"
+                width="0.97"
+                height="0.97"
+                className={emphasis === 'selected' ? 'annotation-selection-box' : 'annotation-hover-edge'}
+              />
+            </svg>
+          ) : null}
+        </>
+      )
     case 'highlight':
-      return <span className="annotation-highlight" style={{ background: overlay.color }} />
+      return (
+        <>
+          <span className="annotation-highlight" style={{ background: overlay.color }} />
+          {emphasis !== 'none' ? (
+            <svg className="annotation-selection-frame" viewBox="0 0 1 1" preserveAspectRatio="none">
+              <rect
+                x="0.01"
+                y="0.08"
+                width="0.98"
+                height="0.84"
+                className={emphasis === 'selected' ? 'annotation-selection-box' : 'annotation-hover-edge'}
+              />
+            </svg>
+          ) : null}
+        </>
+      )
     case 'underline':
-      return <span className="annotation-underline" style={{ borderColor: overlay.color }} />
     case 'strikeout':
-      return <span className="annotation-strikeout" style={{ borderColor: overlay.color }} />
+      return (
+        <>
+          <span
+            className={overlay.type === 'underline' ? 'annotation-underline' : 'annotation-strikeout'}
+            style={{ borderColor: overlay.color }}
+          />
+          {emphasis !== 'none' ? (
+            <svg className="annotation-selection-frame" viewBox="0 0 1 1" preserveAspectRatio="none">
+              <rect
+                x="0.01"
+                y="0.08"
+                width="0.98"
+                height="0.84"
+                className={emphasis === 'selected' ? 'annotation-selection-box' : 'annotation-hover-edge'}
+              />
+            </svg>
+          ) : null}
+        </>
+      )
     default:
       return null
   }
@@ -479,6 +732,21 @@ function TextEditor({
   useEffect(() => {
     measure.current = createCanvasMeasurer(overlayFontCss(overlay, renderScale))
   }, [overlay, renderScale])
+
+  useEffect(() => {
+    const size = fitOverlayToText(
+      overlay,
+      overlay.text ?? '',
+      pageWidth,
+      pageHeight,
+      renderScale,
+      measure.current,
+    )
+    layoutRef.current = size
+    onPreview(size)
+    // Fit once when this note opens so the box matches the current text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- opening the editor is the moment to measure
+  }, [overlay.id])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -558,6 +826,7 @@ function OverlayItem({
   overlay,
   visible,
   selected,
+  hovered,
   editing,
   editPreview,
   editAppearance,
@@ -580,6 +849,7 @@ function OverlayItem({
   overlay: PageOverlay
   visible: PageOverlay
   selected: boolean
+  hovered: boolean
   editing: boolean
   editPreview: { width: number; height: number } | null
   editAppearance: SampledAppearance | null
@@ -603,10 +873,12 @@ function OverlayItem({
     editing && editPreview
       ? { ...visible, width: editPreview.width, height: editPreview.height }
       : visible
+  const emphasis: ShapeEmphasis = selected ? 'selected' : hovered ? 'hover' : 'none'
+  const showHandles = selected && interactive && !editing && tool !== 'eraser'
   return (
     <div
       data-overlay-id={overlay.id}
-      className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
+      className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${hovered ? 'is-hovered' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
       style={overlayStyle(sized, renderScale, editing, editing ? editAppearance : null)}
       role={interactive && !editing ? 'button' : undefined}
       tabIndex={interactive && !editing ? 0 : undefined}
@@ -657,9 +929,10 @@ function OverlayItem({
           renderScale={renderScale}
           pageWidth={pageWidth}
           pageHeight={pageHeight}
+          emphasis={emphasis}
         />
       )}
-      {selected && interactive && !editing && isLinearOverlay(overlay.type) &&
+      {showHandles && isLinearOverlay(overlay.type) &&
         (['start', 'end'] as const).map((handle) => {
           const [start, end] = lineEndpoints(sized)
           const point = handle === 'start' ? start : end
@@ -674,7 +947,7 @@ function OverlayItem({
             />
           )
         })}
-      {selected && interactive && !editing && !isLinearOverlay(overlay.type) &&
+      {showHandles && !isLinearOverlay(overlay.type) &&
         (isBoxShapeOverlay(overlay.type)
           ? (['nw', 'ne', 'sw', 'se'] as const)
           : (['se'] as const)
@@ -730,6 +1003,7 @@ export function AnnotationLayer({
   const [inkDraft, setInkDraft] = useState<PageOverlay | null>(null)
   const eraserRef = useRef<{ pointerId: number; erased: Set<string> } | null>(null)
   const activePointerIdRef = useRef<number | null>(null)
+  const [hoveredOverlayId, setHoveredOverlayId] = useState<string | null>(null)
   const [seenOverlayIds] = useState(() => new Set(overlays.map((overlay) => overlay.id)))
 
   useEffect(() => {
@@ -804,15 +1078,13 @@ export function AnnotationLayer({
   }
 
   const overlayFromSession = (session: CreateSession, end: PagePoint, shift: boolean) => {
-    const type = session.tool === 'wordArt' ? 'text' : session.tool
-    return createDrawnOverlay(type, session.start, end, color, {
+    return createDrawnOverlay(session.tool, session.start, end, color, {
       shift,
       pageAspect: pageAspect(),
       id: session.id,
       sketchSeed: session.sketchSeed,
-      wordArt: session.tool === 'wordArt' ? 'outline' : undefined,
       strokeWidth,
-      fill: fill && isClosedDrawShape(type),
+      fill: fill && isClosedDrawShape(session.tool),
     })
   }
 
@@ -912,6 +1184,24 @@ export function AnnotationLayer({
     setDraft(null)
   }
 
+  const updateHover = (event: React.PointerEvent) => {
+    if (
+      !interactive ||
+      tool === 'eraser' ||
+      gestureRef.current ||
+      createRef.current ||
+      inkRef.current ||
+      eraserRef.current
+    ) {
+      if (hoveredOverlayId) setHoveredOverlayId(null)
+      return
+    }
+    const size = layerSize()
+    const hit = topmostOverlayAt(overlays, pointerPoint(event), size.width, size.height)
+    const nextId = hit?.id ?? null
+    if (nextId !== hoveredOverlayId) setHoveredOverlayId(nextId)
+  }
+
   const updateGesture = (event: React.PointerEvent) => {
     if (createRef.current?.pointerId === event.pointerId) {
       updateCreateDraft(pointerPoint(event), event.shiftKey)
@@ -925,13 +1215,16 @@ export function AnnotationLayer({
     if (inkRef.current?.pointerId === event.pointerId) {
       const point = pointerPoint(event)
       const previous = inkRef.current.points.at(-1)!
-      if (Math.hypot((point.x - previous.x) * size.width, (point.y - previous.y) * size.height) >= 1) {
+      if (Math.hypot((point.x - previous.x) * size.width, (point.y - previous.y) * size.height) >= 0.5) {
         inkRef.current.points.push(point)
-        setInkDraft(createInkOverlay(inkRef.current.points, color, strokeWidth))
+        setInkDraft(liveInkOverlay(inkRef.current.points, color, strokeWidth))
       }
       return
     }
-    if (!gestureRef.current) return
+    if (!gestureRef.current) {
+      updateHover(event)
+      return
+    }
     applyActiveGesture(pointerPoint(event), event.shiftKey, event.clientX, event.clientY)
   }
 
@@ -987,27 +1280,42 @@ export function AnnotationLayer({
     const overlay =
       distance < CLICK_DRAG_THRESHOLD_PX
         ? createDefaultOverlay(
-            session.tool === 'wordArt' ? 'text' : session.tool,
+            session.tool,
             session.start.x,
             session.start.y,
             color,
             {
               id: session.id,
               sketchSeed: session.sketchSeed,
-              wordArt: session.tool === 'wordArt' ? 'outline' : undefined,
               strokeWidth,
-              fill: fill && isClosedDrawShape(session.tool === 'wordArt' ? 'text' : session.tool),
+              fill: fill && isClosedDrawShape(session.tool),
             },
           )
         : overlayFromSession(session, end, event.shiftKey)
+    const placed =
+      overlay.type === 'text'
+        ? (() => {
+            const origin =
+              distance < CLICK_DRAG_THRESHOLD_PX ? session.start : { x: overlay.x, y: overlay.y }
+            const fitted = fitOverlayToText(
+              { ...overlay, x: origin.x, y: origin.y, width: 0.001, height: 0.001 },
+              overlay.text ?? 'Add text',
+              size.width,
+              size.height,
+              renderScale,
+              createCanvasMeasurer(overlayFontCss(overlay, renderScale)),
+            )
+            return { ...overlay, x: origin.x, y: origin.y, ...fitted }
+          })()
+        : overlay
     setCreateDraft(null)
-    onCreate?.(overlay)
-    if (session.tool === 'text' || session.tool === 'wordArt') {
+    onCreate?.(placed)
+    if (session.tool === 'text') {
       setEditSession({
-        id: overlay.id,
+        id: placed.id,
         caret: null,
         appearance: null,
-        preview: null,
+        preview: { width: placed.width, height: placed.height },
       })
     }
     return true
@@ -1021,7 +1329,7 @@ export function AnnotationLayer({
     if (finishCreate(event)) return
     if (inkRef.current?.pointerId === event.pointerId) {
       if (event.type !== 'pointercancel' && inkRef.current.points.length > 1) {
-        onCreate?.(createInkOverlay(inkRef.current.points, color, strokeWidth))
+        onCreate?.(createInkOverlay(inkRef.current.points, color, strokeWidth, layerSize()))
       }
       inkRef.current = null
       setInkDraft(null)
@@ -1068,20 +1376,27 @@ export function AnnotationLayer({
       event.stopPropagation()
       eraserRef.current = { pointerId: event.pointerId, erased: new Set([overlay.id]) }
       onErase?.(overlay.id)
+      setHoveredOverlayId(null)
       captureOnLayer(event)
       return
     }
-    if (!interactive || tool !== 'select' || event.button !== 0) return
+    if (!interactive || !toolCanGrabMarks(tool) || event.button !== 0) return
     event.stopPropagation()
     onSelect?.(overlay.id)
-    const rect = event.currentTarget.getBoundingClientRect()
+    setHoveredOverlayId(overlay.id)
+    const node =
+      event.currentTarget instanceof Element &&
+      event.currentTarget.getAttribute('data-overlay-id') === overlay.id
+        ? event.currentTarget
+        : layerRef.current?.querySelector(`[data-overlay-id="${CSS.escape(overlay.id)}"]`)
+    const rect = node?.getBoundingClientRect()
     const pad = overlayPadPx(overlay, renderScale)
     gestureRef.current = {
-      mode: overlay.type === 'text' && overlay.extracted ? 'maybe-move' : 'move',
+      mode: tool === 'select' && overlay.type === 'text' && overlay.extracted ? 'maybe-move' : 'move',
       overlay,
       startX: event.clientX,
       startY: event.clientY,
-      localX: event.clientX - rect.left - pad.x,
+      localX: rect ? event.clientX - rect.left - pad.x : 0,
     }
     captureOnLayer(event)
   }
@@ -1129,33 +1444,48 @@ export function AnnotationLayer({
   return (
     <div
       ref={layerRef}
-      className={`annotation-layer ${interactive ? 'is-interactive' : ''} tool-${tool}`}
+      className={`annotation-layer ${interactive ? 'is-interactive' : ''} tool-${tool}${hoveredOverlayId ? ' is-over-mark' : ''}`}
       onPointerDown={(event) => {
-        if (!interactive || event.button !== 0 || event.target !== event.currentTarget) return
+        if (!interactive || event.button !== 0) return
         if (!event.isPrimary) return
-        if (tool === 'ink') {
-          inkRef.current = { pointerId: event.pointerId, points: [pointerPoint(event)] }
-          withPointerCapture(event.currentTarget, event.pointerId, true)
-          activePointerIdRef.current = event.pointerId
-          onSelect?.(null)
-          setEditSession(null)
-          return
-        }
+        const onLayer = event.target === event.currentTarget
+        const point = pointerPoint(event)
+        const size = layerSize()
+        if (tool === 'image') return
         if (tool === 'eraser') {
+          if (!onLayer) return
           eraserRef.current = { pointerId: event.pointerId, erased: new Set() }
           withPointerCapture(event.currentTarget, event.pointerId, true)
           activePointerIdRef.current = event.pointerId
-          eraseAt(pointerPoint(event))
+          eraseAt(point)
           return
         }
-        if (tool === 'image') return
+        if (onLayer && toolCanGrabMarks(tool)) {
+          const hit = topmostOverlayAt(overlays, point, size.width, size.height)
+          if (hit) {
+            beginMoveOverlay(event, hit)
+            return
+          }
+        }
+        if (!onLayer) return
+        if (tool === 'ink') {
+          const start = pointerPoint(event)
+          inkRef.current = { pointerId: event.pointerId, points: [start] }
+          setInkDraft(liveInkOverlay([start], color, strokeWidth))
+          withPointerCapture(event.currentTarget, event.pointerId, true)
+          activePointerIdRef.current = event.pointerId
+          onSelect?.(null)
+          setEditSession(null)
+          setHoveredOverlayId(null)
+          return
+        }
         if (tool === 'select') {
           onSelect?.(null)
           setEditSession(null)
+          setHoveredOverlayId(null)
           return
         }
         if (!DRAW_TOOLS.has(tool)) return
-        const point = pointerPoint(event)
         if (tool === 'highlight' || tool === 'underline' || tool === 'strikeout') {
           const line = hitExtractedLine(overlays, point.x, point.y)
           if (line) {
@@ -1177,6 +1507,11 @@ export function AnnotationLayer({
         activePointerIdRef.current = event.pointerId
         onSelect?.(null)
         setEditSession(null)
+        setHoveredOverlayId(null)
+      }}
+      onPointerLeave={() => {
+        if (gestureRef.current || createRef.current || inkRef.current) return
+        setHoveredOverlayId(null)
       }}
       onContextMenu={(event) => {
         if (!interactive) return
@@ -1189,15 +1524,11 @@ export function AnnotationLayer({
         const target = event.target instanceof Element
           ? event.target.closest<HTMLElement>('[data-overlay-id]')
           : null
-        const hitOverlay = target?.dataset.overlayId ?? [...overlays]
-          .reverse()
-          .find(
-            (overlay) =>
-              point.x >= overlay.x &&
-              point.x <= overlay.x + overlay.width &&
-              point.y >= overlay.y &&
-              point.y <= overlay.y + overlay.height,
-          )?.id
+        const hitOverlay =
+          target?.dataset.overlayId ??
+          topmostOverlayAt(overlays, point, bounds.width, bounds.height, {
+            includeExtracted: true,
+          })?.id
         if (hitOverlay) {
           onSelect?.(hitOverlay)
           onOverlayContextMenu?.(event, hitOverlay)
@@ -1213,6 +1544,7 @@ export function AnnotationLayer({
       {overlays.map((overlay) => {
         const visible = draft?.id === overlay.id ? draft : overlay
         const selected = selectedOverlayId === overlay.id
+        const hovered = hoveredOverlayId === overlay.id && !selected
         const editing = editingId === overlay.id && overlay.type === 'text'
         return (
           <OverlayItem
@@ -1220,6 +1552,7 @@ export function AnnotationLayer({
             overlay={overlay}
             visible={visible}
             selected={selected}
+            hovered={hovered}
             editing={editing}
             editPreview={editPreview}
             editAppearance={editAppearance}
@@ -1240,19 +1573,28 @@ export function AnnotationLayer({
                 session?.id === overlay.id ? { ...session, preview } : session,
               )
             }}
-            onEditSave={(value, size) => {
+            onEditSave={(value) => {
               const next = commitText(overlay, value)
+              const fitted = fitOverlayToText(
+                overlay,
+                next,
+                width,
+                height,
+                renderScale,
+                createCanvasMeasurer(overlayFontCss(overlay, renderScale)),
+              )
               const changes: Partial<PageOverlay> = {}
-              if (next !== (overlay.text ?? '')) {
-                changes.text = next
-                if (overlay.extracted) {
-                  changes.width = size.width
-                  changes.height = size.height
-                  if (editAppearance) {
-                    changes.color = editAppearance.color
-                    changes.backgroundColor = editAppearance.backgroundColor
-                  }
-                }
+              if (next !== (overlay.text ?? '')) changes.text = next
+              if (
+                Math.abs(fitted.width - overlay.width) > 0.0005 ||
+                Math.abs(fitted.height - overlay.height) > 0.0005
+              ) {
+                changes.width = fitted.width
+                changes.height = fitted.height
+              }
+              if (overlay.extracted && next !== (overlay.text ?? '') && editAppearance) {
+                changes.color = editAppearance.color
+                changes.backgroundColor = editAppearance.backgroundColor
               }
               if (Object.keys(changes).length) onChange?.(overlay.id, changes)
             }}

@@ -212,3 +212,97 @@ export function sketchPointsFor(
       return sketchRectPoints(seed)
   }
 }
+
+function wobbleSegmentPx(
+  start: SketchPoint,
+  end: SketchPoint,
+  next: () => number,
+  roughness: number,
+): SketchPoint[] {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const length = Math.hypot(dx, dy) || 1
+  const midCount = Math.max(1, Math.min(5, Math.round(length / 72)))
+  const points: SketchPoint[] = [{ x: start.x, y: start.y }]
+  for (let index = 1; index <= midCount; index += 1) {
+    const t = index / (midCount + 1)
+    const nx = -dy / length
+    const ny = dx / length
+    points.push({
+      x: start.x + dx * t + nx * jitter(next, roughness),
+      y: start.y + dy * t + ny * jitter(next, roughness),
+    })
+  }
+  points.push({ x: end.x, y: end.y })
+  return points
+}
+
+function slipPx(next: () => number, roughness: number) {
+  const magnitude = roughness * (0.45 + next() * 0.7)
+  return next() < 0.42 ? -magnitude : magnitude
+}
+
+function sketchEdgesPx(corners: SketchPoint[], seed: number, roughness: number) {
+  const next = rng(seed)
+  return joinStrokes(
+    corners.map((start, index) => {
+      const end = corners[(index + 1) % corners.length]
+      if (!end) return []
+      const from = along(end, start, slipPx(next, roughness))
+      const to = along(start, end, slipPx(next, roughness))
+      return wobbleSegmentPx(from, to, next, roughness)
+    }),
+  )
+}
+
+export function sketchClosedInPixels(
+  type: 'rectangle' | 'ellipse' | 'diamond',
+  seed: number,
+  width: number,
+  height: number,
+  strokeWidth: number,
+): SketchPoint[] {
+  const w = Math.max(1, width)
+  const h = Math.max(1, height)
+  const roughness = Math.max(2.6, strokeWidth * 0.95)
+  const inset = Math.min(w, h) * 0.03 + Math.min(strokeWidth, Math.min(w, h) * 0.08)
+  if (type === 'ellipse') {
+    const next = rng(seed)
+    const steps = 22
+    const extra = 0.04 + next() * 0.05
+    const count = steps + (next() < 0.5 ? 1 : 0)
+    const rx = Math.max(1, w / 2 - inset)
+    const ry = Math.max(1, h / 2 - inset)
+    const points: SketchPoint[] = []
+    for (let index = 0; index <= count; index += 1) {
+      const angle = Math.PI * 2 * (index / steps) - extra * (index === 0 ? 1 : 0)
+      points.push({
+        x: w / 2 + Math.cos(angle) * (rx + jitter(next, roughness)),
+        y: h / 2 + Math.sin(angle) * (ry + jitter(next, roughness)),
+      })
+    }
+    return points
+  }
+  if (type === 'diamond') {
+    return sketchEdgesPx(
+      [
+        { x: w / 2, y: inset },
+        { x: w - inset, y: h / 2 },
+        { x: w / 2, y: h - inset },
+        { x: inset, y: h / 2 },
+      ],
+      seed,
+      roughness,
+    )
+  }
+  return sketchEdgesPx(
+    [
+      { x: inset, y: inset },
+      { x: w - inset, y: inset },
+      { x: w - inset, y: h - inset },
+      { x: inset, y: h - inset },
+    ],
+    seed,
+    roughness,
+  )
+}

@@ -1,4 +1,4 @@
-import type { OverlayType, PageOverlay, WordArtStyle } from './document'
+import type { OverlayType, PageOverlay } from './document'
 import { normalizeOverlay } from './document'
 import {
   boxFromCorners,
@@ -11,7 +11,6 @@ import {
   pagePoint,
   type PagePoint,
 } from '../pdf/shapeGeometry'
-import { sketchPointsFor } from '../pdf/sketch'
 
 const SKETCH_TYPES = new Set<OverlayType>([
   'rectangle',
@@ -22,7 +21,6 @@ const SKETCH_TYPES = new Set<OverlayType>([
 ])
 
 export type OverlayDrawOptions = {
-  wordArt?: WordArtStyle
   id?: string
   sketchSeed?: number
   strokeWidth?: number
@@ -53,7 +51,7 @@ export function createDefaultOverlay(
   options?: OverlayDrawOptions,
 ): PageOverlay {
   const sizes: Record<OverlayType, { width: number; height: number }> = {
-    text: { width: 0.38, height: 0.09 },
+    text: { width: 0.1, height: 0.036 },
     highlight: { width: 0.34, height: 0.055 },
     underline: { width: 0.34, height: 0.035 },
     strikeout: { width: 0.34, height: 0.045 },
@@ -82,10 +80,9 @@ export function createDefaultOverlay(
     strokeWidth: options?.strokeWidth ?? (sketch ? 1.25 : 2),
     backgroundColor: fill,
     text: isText ? 'Add text' : undefined,
-    fontSize: isText ? (options?.wordArt && options.wordArt !== 'plain' ? 28 : 22) : undefined,
+    fontSize: isText ? 22 : undefined,
     fontRole: isText ? 'sans' : undefined,
     fontWeight: isText ? 900 : undefined,
-    wordArt: isText ? (options?.wordArt ?? 'plain') : undefined,
     sketch,
     sketchSeed: seed,
     points: isLinearOverlay(type)
@@ -93,12 +90,7 @@ export function createDefaultOverlay(
           { x: 0.03, y: 0.5 },
           { x: 0.97, y: 0.5 },
         ]
-      : sketch && seed != null && type !== 'ink'
-        ? sketchPointsFor(
-            type as 'rectangle' | 'ellipse' | 'line' | 'arrow' | 'diamond',
-            seed,
-          )
-        : undefined,
+      : undefined,
   })
 }
 
@@ -181,7 +173,6 @@ export function createDrawnOverlay(
   return normalizeOverlay({
     ...overlay,
     ...box,
-    wordArt: options?.wordArt ?? overlay.wordArt,
   })
 }
 
@@ -194,18 +185,62 @@ export function createInkOverlay(
   points: Array<{ x: number; y: number }>,
   color: string,
   strokeWidth: number,
+  pageSize?: { width: number; height: number },
 ): PageOverlay {
   const left = Math.min(...points.map((point) => point.x))
   const top = Math.min(...points.map((point) => point.y))
-  const width = Math.max(0.01, Math.max(...points.map((point) => point.x)) - left)
-  const height = Math.max(0.01, Math.max(...points.map((point) => point.y)) - top)
-  const x = Math.min(left, 1 - width)
-  const y = Math.min(top, 1 - height)
+  const right = Math.max(...points.map((point) => point.x))
+  const bottom = Math.max(...points.map((point) => point.y))
+  const padX = pageSize ? Math.max(4, strokeWidth * 2) / Math.max(1, pageSize.width) : 0.004
+  const padY = pageSize ? Math.max(4, strokeWidth * 2) / Math.max(1, pageSize.height) : 0.004
+  let x = left - padX
+  let y = top - padY
+  let width = right - left + padX * 2
+  let height = bottom - top + padY * 2
+  if (x < 0) {
+    width += x
+    x = 0
+  }
+  if (y < 0) {
+    height += y
+    y = 0
+  }
+  width = Math.max(padX * 2, Math.min(1 - x, width))
+  height = Math.max(padY * 2, Math.min(1 - y, height))
   return normalizeOverlay({
-    id: crypto.randomUUID(), type: 'ink', x, y, width, height,
-    color, strokeWidth, opacity: 1,
-    points: points.map((point) => ({ x: (point.x - x) / width, y: (point.y - y) / height })),
+    id: crypto.randomUUID(),
+    type: 'ink',
+    x,
+    y,
+    width,
+    height,
+    color,
+    strokeWidth,
+    opacity: 1,
+    points: points.map((point) => ({
+      x: (point.x - x) / width,
+      y: (point.y - y) / height,
+    })),
   })
+}
+
+export function liveInkOverlay(
+  points: Array<{ x: number; y: number }>,
+  color: string,
+  strokeWidth: number,
+): PageOverlay {
+  return {
+    id: 'ink-live',
+    type: 'ink',
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    color,
+    strokeWidth,
+    opacity: 1,
+    points,
+  }
 }
 
 export function hitExtractedLine(
@@ -275,7 +310,7 @@ export function withSketchStyle(overlay: PageOverlay, sketch: boolean): Partial<
   return {
     sketch: true,
     sketchSeed: seed,
-    points: overlay.points ?? sketchPointsFor(type, seed),
+    points: undefined,
   }
 }
 

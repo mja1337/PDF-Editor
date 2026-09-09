@@ -124,6 +124,16 @@ describe('text layout', () => {
     )
     expect(note.width).toBeGreaterThan(0.2)
     expect(note.width).toBeLessThanOrEqual(1 - PAGE_EDGE_MARGIN - 0.1 + 1e-6)
+    const compact = fitOverlayToText(
+      { x: 0.1, y: 0.2, width: 0.38, height: 0.09, fontSize: 22 },
+      'Hi',
+      1000,
+      1400,
+      1,
+      measure,
+    )
+    expect(compact.width).toBeLessThan(0.12)
+    expect(compact.height).toBeLessThan(0.05)
   })
 
   it('keeps the original box when the replacement is shorter', () => {

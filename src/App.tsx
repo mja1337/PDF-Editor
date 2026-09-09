@@ -39,7 +39,6 @@ import {
   Search,
   SendToBack,
   Slash,
-  Sparkles,
   Square,
   Strikethrough,
   Trash2,
@@ -76,11 +75,10 @@ import {
   documentReducer,
   initialHistory,
 } from './domain/document'
-import type { OverlayType, PageOverlay, WordArtStyle } from './domain/document'
+import type { OverlayType, PageOverlay } from './domain/document'
 import { createDefaultOverlay, isClosedDrawShape, withSketchStyle } from './domain/overlays'
 import { loadPreferences, savePreferences } from './domain/preferences'
 import { platformOcrAvailable } from './pdf/ocr'
-import { WORD_ART_STYLES } from './pdf/wordArt'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
 import type { OutlineEntry, SearchResult } from './pdf/navigation'
@@ -130,7 +128,6 @@ const ANNOTATE_PALETTE: Array<
   { id: 'eraser', label: 'Erase', icon: Eraser },
   { id: 'signature', label: 'Signature', icon: PenLine },
   { id: 'text', label: 'Text', icon: Type },
-  { id: 'wordArt', label: 'Word Art', icon: Sparkles },
   { id: 'highlight', label: 'Highlight', icon: Highlighter },
   { id: 'underline', label: 'Underline', icon: Underline },
   { id: 'strikeout', label: 'Strike', icon: Strikethrough },
@@ -187,21 +184,20 @@ function annotationUsesFill(tool: AnnotationTool) {
 }
 
 function annotationHint(tool: AnnotationTool, hasExtracted: boolean) {
-  if (tool === 'select') return null
-  if (tool === 'ink') return 'Drag to draw. Stay on Draw for more strokes. Escape returns to Select.'
+  if (tool === 'select') return 'Drag a mark to move it. Handles resize. Click empty space to clear the selection.'
+  if (tool === 'ink') return 'Draw freely like a pen. Click a stroke to move it. Escape returns to Select.'
   if (tool === 'eraser') return 'Drag over strokes, shapes, or notes. Escape returns to Select.'
   if (tool === 'highlight' || tool === 'underline' || tool === 'strikeout') {
     return hasExtracted
-      ? 'Click an analysed line, or drag a free mark. Shift squares. Keep the tool to mark more.'
-      : 'Drag to size a mark. Analyse text first to mark whole lines.'
+      ? 'Click a mark to move it, or an analysed line to mark. Drag empty space to draw. Escape returns to Select.'
+      : 'Drag empty space to size a mark. Click an existing mark to move it.'
   }
-  if (tool === 'wordArt') return 'Click or drag to place stylised text, then type.'
-  if (tool === 'text') return 'Click or drag to place text, then type. Double-click a note to edit.'
+  if (tool === 'text') return 'Click or drag empty space to place text, then type. Click a mark to move it.'
   if (tool === 'line' || tool === 'arrow') {
-    return 'Drag from A to B. Shift snaps 45°. Escape cancels. Keep the tool to draw more.'
+    return 'Drag empty space from A to B. Click a mark to move it. Shift snaps 45°. Escape returns to Select.'
   }
   if (tool === 'rectangle' || tool === 'ellipse' || tool === 'diamond') {
-    return 'Drag to size. Shift constrains. Escape cancels. Keep the tool to draw more.'
+    return 'Drag empty space to size. Click a mark to move it. Shift constrains. Escape returns to Select.'
   }
   return 'Click the page to place the annotation.'
 }
@@ -905,7 +901,7 @@ export function App() {
   const closeContextMenu = useCallback(() => setContextTarget(null), [])
 
   const placeContextOverlay = useCallback(
-    (type: OverlayType, options?: { wordArt?: WordArtStyle }) => {
+    (type: OverlayType) => {
       if (contextTarget?.kind !== 'canvas') return
       const overlay = createDefaultOverlay(
         type,
@@ -913,13 +909,16 @@ export function App() {
         contextTarget.point.y,
         annotationColor,
         {
-          ...options,
           strokeWidth: inkWidth,
           fill: annotationFill && isClosedDrawShape(type),
         },
       )
-      dispatch({ type: 'addOverlay', pageId: contextTarget.pageId, overlay })
-      setSelectedOverlayId(overlay.id)
+      const placed =
+        type === 'text'
+          ? { ...overlay, x: contextTarget.point.x, y: contextTarget.point.y }
+          : overlay
+      dispatch({ type: 'addOverlay', pageId: contextTarget.pageId, overlay: placed })
+      setSelectedOverlayId(placed.id)
       setAnnotationTool('select')
     },
     [annotationColor, annotationFill, contextTarget, inkWidth],
@@ -1033,12 +1032,6 @@ export function App() {
           label: 'Add text here',
           icon: <Type size={16} />,
           onSelect: () => placeContextOverlay('text'),
-        },
-        {
-          id: 'add-word-art',
-          label: 'Add word art here',
-          icon: <Sparkles size={16} />,
-          onSelect: () => placeContextOverlay('text', { wordArt: 'outline' }),
         },
         {
           id: 'add-highlight',
@@ -2053,27 +2046,6 @@ export function App() {
                       }
                     />
                   </label>
-                )}
-                {selectedOverlay.type === 'text' && !selectedOverlay.extracted && (
-                  <div className="property-row">
-                    <span>Word art</span>
-                    <div className="property-options">
-                      {WORD_ART_STYLES.map((style) => (
-                        <button
-                          key={style.id}
-                          type="button"
-                          className={
-                            (selectedOverlay.wordArt ?? 'plain') === style.id ? 'is-active' : ''
-                          }
-                          onClick={() =>
-                            updateSelectedOverlay(selectedOverlay.id, { wordArt: style.id })
-                          }
-                        >
-                          {style.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 )}
                 {selectedOverlay.extracted && (
                   <p className="tool-hint">
