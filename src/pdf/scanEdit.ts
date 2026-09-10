@@ -1,5 +1,6 @@
 import type { PageOverlay } from '../domain/document'
 import { cssFontFamily } from './fontMatch'
+import { pitchBand } from './textGeometry'
 import {
   EXTRACTED_LINE_HEIGHT,
   layoutExtractedLines,
@@ -34,48 +35,33 @@ export function canFlattenScanEdits() {
 /** Bleed that hides ascenders and descenders of the covered line. */
 const COVER_BLEED = 0.16
 
-function verticalGaps(
-  overlay: Pick<PageOverlay, 'x' | 'y' | 'width' | 'height'>,
-  neighbours: ReadonlyArray<PageOverlay>,
-) {
-  const right = overlay.x + overlay.width
-  const bottom = overlay.y + overlay.height
-  let above = overlay.y
-  let below = 1 - bottom
-  for (const other of neighbours) {
-    if (!other.extracted || other === overlay) continue
-    if (other.x >= right || other.x + other.width <= overlay.x) continue
-    const otherBottom = other.y + other.height
-    if (otherBottom <= overlay.y) above = Math.min(above, overlay.y - otherBottom)
-    else if (other.y >= bottom) below = Math.min(below, other.y - bottom)
-  }
-  return { above: Math.max(0, above), below: Math.max(0, below) }
-}
-
 /**
  * The rectangle painted over an original line before its replacement is drawn.
- * The bleed is capped at half the clear space to the neighbouring lines, so a
- * tight block such as an address never has its other rows wiped out.
+ * It is clipped to the band between the neighbouring baselines, so a tight
+ * block such as an address never has its other rows wiped out -- including in
+ * documents analysed before line boxes were trimmed to their pitch.
  */
 export function coverBox(
   overlay: Pick<PageOverlay, 'x' | 'y' | 'width' | 'height'>,
   neighbours: ReadonlyArray<PageOverlay> = [],
 ): CoverBox {
-  const gaps = verticalGaps(overlay, neighbours)
+  const band = pitchBand(
+    overlay,
+    neighbours.filter((other) => other.extracted && other !== overlay),
+  )
   const bleed = overlay.height * COVER_BLEED
-  const padTop = Math.min(bleed, gaps.above / 2)
-  const padBottom = Math.min(bleed, gaps.below / 2)
+  const top = Math.max(0, band.top, overlay.y - bleed)
+  const bottom = Math.min(1, band.bottom, overlay.y + overlay.height + bleed)
   const padX = Math.min(
     Math.max(overlay.height * 0.12, overlay.width * 0.01),
     overlay.x,
   )
   const x = Math.max(0, overlay.x - padX)
-  const y = Math.max(0, overlay.y - padTop)
   return {
     x,
-    y,
+    y: top,
     width: Math.min(1 - x, overlay.width + padX * 2),
-    height: Math.min(1 - y, overlay.height + padTop + padBottom),
+    height: Math.max(0, bottom - top),
   }
 }
 

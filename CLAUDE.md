@@ -52,6 +52,16 @@ decided in the component. Do not add `.tool-*` override blocks to suppress somet
 a component should not have rendered, and treat a new `!important` as a sign the fix
 is in the wrong place.
 
+**Line boxes own a pitch band.** pdf.js reports run heights that include
+ascenders and descenders, and `padRun` adds 16% more, so on tight leading the
+measured boxes overlap their neighbours before anything is edited.
+`clampBoxesToPitch` in `src/pdf/textGeometry.ts` trims each box to the band
+halfway to the lines above and below it in the same column. Everything
+downstream assumes non-overlapping line boxes: `extractedFitBounds` orders
+lines by centre rather than by box edges so it still works on documents
+analysed before this, and `coverBox` clips to the same band so an export can
+never paint over a neighbouring row.
+
 **Analysed text has one layout rule, in one place.** `src/pdf/extractedTextFit.ts`
 decides how an edited line is sized: grow right into free space, then wrap downward
 into free space, then shrink the type, and report `overflow` rather than clip.

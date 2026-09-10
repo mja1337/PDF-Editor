@@ -15,6 +15,53 @@ export interface ExtractedTextRun {
   colorSegments?: ColorSegment[]
 }
 
+export interface PitchBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** A clamp that would cut a box below this share of its measured height is
+ * treated as a measurement oddity and skipped. */
+const MIN_PITCH_SHARE = 0.4
+
+function sharesColumn(box: PitchBox, other: PitchBox) {
+  return other.x < box.x + box.width && other.x + other.width > box.x
+}
+
+/**
+ * The vertical band a line owns: halfway to the line above it and halfway to
+ * the line below it in the same column. pdf.js reports run heights that include
+ * ascenders and descenders, so on tight leading the raw boxes overlap their
+ * neighbours before anything is edited.
+ */
+export function pitchBand(box: PitchBox, others: readonly PitchBox[]) {
+  const centre = box.y + box.height / 2
+  let top = 0
+  let bottom = 1
+  for (const other of others) {
+    if (other === box || !sharesColumn(box, other)) continue
+    const otherCentre = other.y + other.height / 2
+    if (otherCentre < centre) top = Math.max(top, (otherCentre + centre) / 2)
+    else if (otherCentre > centre) bottom = Math.min(bottom, (otherCentre + centre) / 2)
+  }
+  return { top, bottom }
+}
+
+/** Trims line boxes so neighbours in the same column stop overlapping. */
+export function clampBoxesToPitch<T extends PitchBox>(boxes: T[]): T[] {
+  return boxes.map((box) => {
+    const band = pitchBand(box, boxes)
+    const top = Math.max(box.y, band.top)
+    const bottom = Math.min(box.y + box.height, band.bottom)
+    const height = bottom - top
+    if (height >= box.height - 1e-9) return box
+    if (height < box.height * MIN_PITCH_SHARE) return box
+    return { ...box, y: top, height }
+  })
+}
+
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value))
 }
@@ -103,5 +150,5 @@ export function groupTextRuns(runs: ExtractedTextRun[]): ExtractedTextRun[] {
     }
     grouped.push(mergeLine(cluster))
   }
-  return grouped.filter((run) => run.text.length > 0).map(padRun)
+  return clampBoxesToPitch(grouped.filter((run) => run.text.length > 0).map(padRun))
 }

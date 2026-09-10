@@ -55,6 +55,17 @@ describe('extractedFitBounds', () => {
     expect(bounds.maxBottom).toBeCloseTo(0.156, 5)
   })
 
+  it('still sees the line below when the measured boxes overlap', () => {
+    // 12pt on 14pt leading: boxes overlap, so an edge test sees no neighbour.
+    const subject = line({ id: 'a', y: 0.1, height: 0.028 })
+    const below = line({ id: 'b', y: 0.12, height: 0.028 })
+    expect(below.y).toBeLessThan(subject.y + subject.height)
+    const bounds = extractedFitBounds(subject, [subject, below])
+    expect(bounds.maxBottom).toBeCloseTo(0.116, 5)
+    // No room to grow is not the same as being free to reach the page edge.
+    expect(bounds.maxBottom).toBeLessThan(subject.y + subject.height)
+  })
+
   it('ignores annotations and lines that do not share a row or column', () => {
     const subject = line({ id: 'a' })
     const bounds = extractedFitBounds(subject, [
@@ -63,6 +74,25 @@ describe('extractedFitBounds', () => {
     ])
     expect(bounds.maxRight).toBeCloseTo(0.97, 5)
     expect(bounds.maxBottom).toBeCloseTo(0.97, 5)
+  })
+})
+
+describe('fitExtractedText with no room below', () => {
+  it('shrinks instead of growing over the next line', () => {
+    // Pitch-trimmed boxes: each line ends exactly where the next begins.
+    const overlay = line({ id: 'a', x: 0.1, y: 0.1, width: 0.2, height: 0.02, fontSize: 20 })
+    const below = line({ id: 'b', x: 0.1, y: 0.12, width: 0.2, height: 0.02 })
+    const fit = fitExtractedText({
+      overlay,
+      text: 'A replacement much longer than the line it replaces',
+      bounds: extractedFitBounds(overlay, [overlay, below]),
+      pageWidth: PAGE,
+      pageHeight: PAGE,
+      measure,
+    })
+    expect(overlay.y + fit.height).toBeLessThanOrEqual(below.y + 1e-9)
+    expect(fit.height).toBeCloseTo(0.02, 5)
+    expect(fit.lines).toHaveLength(1)
   })
 })
 

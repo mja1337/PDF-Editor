@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { samplePatch } from '../src/pdf/pageSample'
-import { groupTextRuns, type ExtractedTextRun } from '../src/pdf/textGeometry'
+import {
+  clampBoxesToPitch,
+  groupTextRuns,
+  pitchBand,
+  type ExtractedTextRun,
+} from '../src/pdf/textGeometry'
 import {
   caretIndexAtX,
   fitOverlayToText,
@@ -138,5 +143,65 @@ describe('page sample', () => {
     const sampled = samplePatch({ data, width, height })
     expect(sampled.backgroundColor).toMatch(/^#d2/i)
     expect(Number.parseInt(sampled.color.slice(1, 3), 16)).toBeGreaterThan(180)
+  })
+})
+
+describe('line pitch', () => {
+  /** 12pt type on 14pt leading: run heights include ascenders and descenders,
+   * so the measured boxes overlap their neighbours before any editing. */
+  function block(pitch: number, height: number) {
+    return [0, 1, 2, 3].map((row) => ({
+      id: `row-${row}`,
+      x: 0.1,
+      y: 0.1 + row * pitch,
+      width: 0.3,
+      height,
+    }))
+  }
+
+  it('gives each line the band halfway to its neighbours', () => {
+    const rows = block(0.02, 0.028)
+    // Centres sit at 0.114, 0.134, 0.154, so the middle line owns 0.124-0.144.
+    const band = pitchBand(rows[1], rows)
+    expect(band.top).toBeCloseTo(0.124, 5)
+    expect(band.bottom).toBeCloseTo(0.144, 5)
+  })
+
+  it('trims overlapping boxes so a tight block stops colliding', () => {
+    const rows = block(0.02, 0.028)
+    for (let i = 1; i < rows.length; i += 1) {
+      expect(rows[i].y).toBeLessThan(rows[i - 1].y + rows[i - 1].height)
+    }
+    const trimmed = clampBoxesToPitch(rows)
+    for (let i = 1; i < trimmed.length; i += 1) {
+      expect(trimmed[i].y).toBeGreaterThanOrEqual(
+        trimmed[i - 1].y + trimmed[i - 1].height - 1e-9,
+      )
+    }
+    // The line keeps as much of its measured box as the pitch allows.
+    expect(trimmed[1].height).toBeCloseTo(0.02, 5)
+  })
+
+  it('leaves generous leading untouched', () => {
+    const rows = block(0.06, 0.028)
+    expect(clampBoxesToPitch(rows)).toEqual(rows)
+  })
+
+  it('does not let a second column trim the first', () => {
+    const left = { id: 'l', x: 0.1, y: 0.1, width: 0.3, height: 0.028 }
+    const right = { id: 'r', x: 0.55, y: 0.104, width: 0.3, height: 0.028 }
+    expect(clampBoxesToPitch([left, right])).toEqual([left, right])
+  })
+
+  it('keeps a box whose neighbours would collapse it', () => {
+    // A tall block boxed in above and below by runs measured almost on its own
+    // centre: trimming would leave almost nothing, so leave the measurement be.
+    const tall = { id: 'tall', x: 0.1, y: 0.1, width: 0.3, height: 0.1 }
+    const boxed = [
+      { id: 'above', x: 0.1, y: 0.13, width: 0.3, height: 0.02 },
+      tall,
+      { id: 'below', x: 0.1, y: 0.15, width: 0.3, height: 0.02 },
+    ]
+    expect(clampBoxesToPitch(boxed)[1]).toEqual(tall)
   })
 })
