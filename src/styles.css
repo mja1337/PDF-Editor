@@ -1357,6 +1357,21 @@ input:focus-visible,
   flex: none;
 }
 
+.extracted-text-warning button {
+  min-height: 22px;
+  padding: 0 7px;
+  color: #ffd9d7;
+  background: rgba(217, 83, 79, 0.22);
+  border: 1px solid rgba(217, 83, 79, 0.4);
+  border-radius: 6px;
+  font-size: 0.64rem;
+  cursor: pointer;
+}
+
+.extracted-text-warning button:hover {
+  background: rgba(217, 83, 79, 0.34);
+}
+
 .extracted-text-row textarea {
   width: 100%;
   min-height: 0;

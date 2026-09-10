@@ -52,6 +52,7 @@ export interface FittedSize {
   height: number
   fontSize?: number
   overflow?: boolean
+  overflowBy?: number
 }
 
 /**
@@ -85,6 +86,7 @@ function fitOverlayBox(
     height: fit.height,
     fontSize: fit.fontSize,
     overflow: fit.overflow,
+    overflowBy: Math.max(0, fit.neededHeight - fit.height),
   }
 }
 
@@ -1211,7 +1213,9 @@ export function AnnotationLayer({
       if (Math.abs(fit.fontSize - (overlay.fontSize ?? 18)) > 0.01) {
         changes.fontSize = fit.fontSize
       }
+      const overflowBy = fit.overflow ? Math.max(0, fit.neededHeight - fit.height) : undefined
       if (Boolean(fit.overflow) !== Boolean(overlay.overflow)) changes.overflow = fit.overflow
+      if ((overflowBy ?? 0) !== (overlay.overflowBy ?? 0)) changes.overflowBy = overflowBy
       if (Object.keys(changes).length) onChange(overlay.id, changes)
     }
   }, [editingId, height, interactive, onChange, overlays, renderScale, width])
@@ -1787,6 +1791,10 @@ export function AnnotationLayer({
                 }
                 if (Boolean(fitted.overflow) !== Boolean(overlay.overflow)) {
                   changes.overflow = fitted.overflow
+                }
+                const nextOverflowBy = fitted.overflow ? fitted.overflowBy : undefined
+                if ((nextOverflowBy ?? 0) !== (overlay.overflowBy ?? 0)) {
+                  changes.overflowBy = nextOverflowBy
                 }
                 if (next !== (overlay.text ?? '') && editAppearance) {
                   changes.color = editAppearance.color
