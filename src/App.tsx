@@ -77,7 +77,12 @@ import {
   documentReducer,
   initialHistory,
 } from './domain/document'
-import type { LogoStampConfig, OverlayType, PageOverlay } from './domain/document'
+import type {
+  LogoStampConfig,
+  OverlayType,
+  PageOverlay,
+  WatermarkConfig,
+} from './domain/document'
 import { createDefaultOverlay, isClosedDrawShape, withSketchStyle } from './domain/overlays'
 import {
   loadAppStorage,
@@ -341,6 +346,8 @@ export function App() {
     ocrPages: number
   } | null>(null)
   const [watermarkText, setWatermarkText] = useState('')
+  const [watermarkOpacity, setWatermarkOpacity] = useState(0.2)
+  const [watermarkRotation, setWatermarkRotation] = useState(45)
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>('select')
   const [annotationColor, setAnnotationColor] = useState('#e05252')
   const [annotationFill, setAnnotationFill] = useState(false)
@@ -375,6 +382,22 @@ export function App() {
   const analyseAbortRef = useRef<AbortController | null>(null)
   const passwordPromptRef = useRef<((password: string | null) => void) | null>(null)
   const editorDocument = history.present
+  const previewWatermark = useMemo((): WatermarkConfig | null => {
+    const draftText = watermarkText.trim()
+    if (draftText) {
+      return {
+        text: draftText,
+        opacity: watermarkOpacity,
+        rotation: watermarkRotation,
+      }
+    }
+    return editorDocument?.watermark ?? null
+  }, [
+    editorDocument?.watermark,
+    watermarkOpacity,
+    watermarkRotation,
+    watermarkText,
+  ])
 
   const requestedSelectedIndex =
     editorDocument?.pages.findIndex((page) => page.id === selectedPageId) ?? -1
@@ -448,6 +471,19 @@ export function App() {
   useEffect(() => {
     ocrConsentRef.current = ocrConsent
   }, [ocrConsent])
+
+  useEffect(() => {
+    const watermark = editorDocument?.watermark
+    if (watermark) {
+      setWatermarkText(watermark.text)
+      setWatermarkOpacity(watermark.opacity)
+      setWatermarkRotation(watermark.rotation)
+      return
+    }
+    setWatermarkText('')
+    setWatermarkOpacity(0.2)
+    setWatermarkRotation(45)
+  }, [editorDocument?.id, editorDocument?.watermark])
 
   useEffect(() => {
     void loadAppStorage().then((storage) => {
@@ -574,7 +610,6 @@ export function App() {
         setSearchQuery('')
         setSearchResults([])
         setActiveSearchIndex(0)
-        setWatermarkText('')
         setAnnotationTool('select')
         setSelectedOverlayId(null)
         setAnalyseSummary(null)
@@ -668,7 +703,6 @@ export function App() {
         setSearchQuery('')
         setSearchResults([])
         setActiveSearchIndex(0)
-        setWatermarkText('')
         setAnnotationTool('select')
         setSelectedOverlayId(null)
         setAnalyseSummary(null)
@@ -829,7 +863,6 @@ export function App() {
     setSearchQuery('')
     setSearchResults([])
     setActiveSearchIndex(0)
-    setWatermarkText('')
     setAnnotationTool('select')
     setSelectedOverlayId(null)
     setOverlayClipboard(null)
@@ -1853,7 +1886,7 @@ export function App() {
                         focusPage(draggedPageId)
                         setDraggedPageId(null)
                       }}
-                      watermark={editorDocument.watermark}
+                      watermark={previewWatermark}
                       stamp={editorDocument.stamp}
                     />
                   )
@@ -2056,7 +2089,7 @@ export function App() {
                       viewMode === 'page' ? Math.max(stageHeight - 160, 260) : undefined
                     }
                     label={`Page ${selectedIndex + 1} of ${editorDocument.pages.length}`}
-                    watermark={editorDocument.watermark}
+                    watermark={previewWatermark}
                     stamp={editorDocument.stamp}
                     overlays={selectedPage.overlays}
                     interactiveAnnotations
@@ -2154,9 +2187,9 @@ export function App() {
                         <li key={overlay.id}>
                           <button
                             type="button"
-                            className={
-                              selectedOverlayId === overlay.id ? 'is-active' : ''
-                            }
+                            className={`extracted-text-item${
+                              selectedOverlayId === overlay.id ? ' is-active' : ''
+                            }`}
                             onClick={() => {
                               setAnnotationTool('select')
                               setSelectedOverlayId(overlay.id)
@@ -2539,6 +2572,48 @@ export function App() {
                   onChange={(event) => setWatermarkText(event.target.value)}
                 />
               </label>
+              <div className="property-row">
+                <span>Opacity</span>
+                <div className="property-options">
+                  {[0.1, 0.15, 0.2, 0.3, 0.4].map((opacity) => (
+                    <button
+                      key={opacity}
+                      type="button"
+                      className={watermarkOpacity === opacity ? 'is-active' : ''}
+                      onClick={() => setWatermarkOpacity(opacity)}
+                    >
+                      {Math.round(opacity * 100)}%
+                    </button>
+                  ))}
+                </div>
+                <label className="watermark-opacity-slider">
+                  <span>Fine tune · {Math.round(watermarkOpacity * 100)}%</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={50}
+                    value={Math.round(watermarkOpacity * 100)}
+                    onChange={(event) =>
+                      setWatermarkOpacity(Number(event.currentTarget.value) / 100)
+                    }
+                  />
+                </label>
+              </div>
+              <div className="property-row">
+                <span>Angle</span>
+                <div className="property-options">
+                  {[-45, -30, 0, 30, 45].map((rotation) => (
+                    <button
+                      key={rotation}
+                      type="button"
+                      className={watermarkRotation === rotation ? 'is-active' : ''}
+                      onClick={() => setWatermarkRotation(rotation)}
+                    >
+                      {rotation}°
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="button-grid">
                 <button
                   type="button"
@@ -2548,21 +2623,18 @@ export function App() {
                       type: 'setWatermark',
                       watermark: {
                         text: watermarkText.trim(),
-                        opacity: 0.2,
-                        rotation: 45,
+                        opacity: watermarkOpacity,
+                        rotation: watermarkRotation,
                       },
                     })
                   }
                 >
-                  <Type size={17} /> Apply
+                  <Type size={17} /> {editorDocument.watermark ? 'Update' : 'Apply'}
                 </button>
                 <button
                   type="button"
                   disabled={!editorDocument.watermark}
-                  onClick={() => {
-                    dispatch({ type: 'setWatermark', watermark: null })
-                    setWatermarkText('')
-                  }}
+                  onClick={() => dispatch({ type: 'setWatermark', watermark: null })}
                 >
                   <X size={17} /> Clear
                 </button>
