@@ -13,9 +13,9 @@ A private, local-first PDF workspace designed for GitHub Pages. Documents are op
 - Zoom the focused page from 50% to 200%.
 - Select individual pages, toggle selections, select ranges, or select all pages for bulk edits.
 - Navigate by page number, keyboard, fit width, or fit page.
-- Search extracted text across the complete local document and jump between matches.
+- Search native PDF text plus analysed/OCR lines and text-box annotations across the document.
 - Analyse a document on demand to turn found text lines into editable boxes, with progress and cancellation. Scanned pages can use an optional on-device Tesseract OCR engine served from this GitHub Pages site after you agree.
-- Browse embedded PDF outlines/bookmarks when present.
+- Browse embedded PDF bookmarks when the source file includes them (hidden for scans and most exports).
 - Add text boxes, highlights, underlines, strikeouts, rectangles, ellipses, and lines.
 - Select, move, resize, keyboard-nudge, recolour, restyle, copy, paste, duplicate, or delete annotations with undo/redo.
 - Use keyboard-accessible right-click menus with page, canvas-placement, and annotation-specific actions.

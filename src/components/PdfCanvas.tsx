@@ -43,6 +43,8 @@ interface PdfCanvasProps {
   ) => void
   pendingSignature?: SavedSignature | null
   onPlaceSignature?: (overlay: PageOverlay) => void
+  searchHighlightOverlayIds?: ReadonlySet<string>
+  activeSearchOverlayId?: string | null
 }
 
 export function PdfCanvas({
@@ -71,6 +73,8 @@ export function PdfCanvas({
   onOverlayContextMenu,
   pendingSignature,
   onPlaceSignature,
+  searchHighlightOverlayIds,
+  activeSearchOverlayId,
 }: PdfCanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -269,6 +273,8 @@ export function PdfCanvas({
           onOverlayContextMenu={onOverlayContextMenu}
           pendingSignature={pendingSignature}
           onPlaceSignature={onPlaceSignature}
+          searchHighlightOverlayIds={searchHighlightOverlayIds}
+          activeSearchOverlayId={activeSearchOverlayId}
         />
       )}
     </div>

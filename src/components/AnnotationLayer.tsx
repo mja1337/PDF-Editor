@@ -73,6 +73,8 @@ interface AnnotationLayerProps {
   ) => void
   pendingSignature?: SavedSignature | null
   onPlaceSignature?: (overlay: PageOverlay) => void
+  searchHighlightOverlayIds?: ReadonlySet<string>
+  activeSearchOverlayId?: string | null
 }
 
 interface Gesture {
@@ -860,6 +862,8 @@ function OverlayItem({
   onEditSave,
   onEditCancel,
   onErase,
+  searchMatch = false,
+  searchActive = false,
 }: {
   overlay: PageOverlay
   visible: PageOverlay
@@ -884,6 +888,8 @@ function OverlayItem({
   onEditSave: (value: string, size: { width: number; height: number }) => void
   onEditCancel: () => void
   onErase?: (overlayId: string) => void
+  searchMatch?: boolean
+  searchActive?: boolean
 }) {
   const sized =
     editing && editPreview
@@ -894,7 +900,7 @@ function OverlayItem({
   return (
     <div
       data-overlay-id={overlay.id}
-      className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${hovered ? 'is-hovered' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
+      className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${hovered ? 'is-hovered' : ''} ${searchMatch ? 'is-search-match' : ''} ${searchActive ? 'is-search-active' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
       style={overlayStyle(sized, renderScale, editing, editing ? editAppearance : null)}
       role={interactive && !editing ? 'button' : undefined}
       tabIndex={interactive && !editing ? 0 : undefined}
@@ -1006,6 +1012,8 @@ export function AnnotationLayer({
   onOverlayContextMenu,
   pendingSignature = null,
   onPlaceSignature,
+  searchHighlightOverlayIds,
+  activeSearchOverlayId = null,
 }: AnnotationLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
@@ -1623,6 +1631,8 @@ export function AnnotationLayer({
             onBeginEndpoint={beginEndpointOverlay}
             onBeginTextEdit={beginTextEdit}
             onErase={onErase}
+            searchMatch={searchHighlightOverlayIds?.has(overlay.id) ?? false}
+            searchActive={activeSearchOverlayId === overlay.id}
             onEditPreview={(preview) => {
               setEditSession((session) =>
                 session?.id === overlay.id ? { ...session, preview } : session,

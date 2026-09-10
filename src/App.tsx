@@ -68,6 +68,7 @@ import {
 } from './components/ContextMenu'
 import { PasswordDialog } from './components/PasswordDialog'
 import { PdfCanvas } from './components/PdfCanvas'
+import { SearchExcerpt } from './components/SearchExcerpt'
 import { ServiceWorkerStatus } from './components/ServiceWorkerStatus'
 import {
   createEditorDocumentFromSources,
@@ -321,6 +322,7 @@ export function App() {
   const [previewWidth, setPreviewWidth] = useState(0)
   const [navigatorMode, setNavigatorMode] = useState<NavigatorMode>('pages')
   const [outlineEntries, setOutlineEntries] = useState<OutlineEntry[]>([])
+  const [hasOutline, setHasOutline] = useState(false)
   const [outlineStatus, setOutlineStatus] = useState<'idle' | 'loading' | 'ready'>(
     'idle',
   )
@@ -329,6 +331,7 @@ export function App() {
   const [searchStatus, setSearchStatus] = useState<
     'idle' | 'searching' | 'ready'
   >('idle')
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0)
   const [searchProgress, setSearchProgress] = useState('')
   const [analyseProgress, setAnalyseProgress] = useState('')
   const [analyseSummary, setAnalyseSummary] = useState<{
@@ -364,6 +367,7 @@ export function App() {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const stageRef = useRef<HTMLElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchResultRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
   const sessionsRef = useRef<Map<string, PdfSession>>(new Map())
   const loadSequence = useRef(0)
   const selectionAnchorRef = useRef<string | null>(null)
@@ -412,6 +416,23 @@ export function App() {
   const selectedSession = selectedPage
     ? sessions.get(selectedPage.sourceDocumentId) ?? null
     : null
+  const searchHighlightOverlayIds = useMemo(() => {
+    if (searchStatus !== 'ready' || searchResults.length === 0 || !selectedPage) {
+      return undefined
+    }
+    const ids = searchResults
+      .filter((result) => result.pageId === selectedPage.id && result.overlayId)
+      .map((result) => result.overlayId!)
+    return ids.length > 0 ? new Set(ids) : undefined
+  }, [searchResults, searchStatus, selectedPage])
+  const activeSearchOverlayId = useMemo(() => {
+    if (searchStatus !== 'ready' || searchResults.length === 0 || !selectedPage) {
+      return null
+    }
+    const active = searchResults[activeSearchIndex]
+    if (!active || active.pageId !== selectedPage.id) return null
+    return active.overlayId ?? null
+  }, [activeSearchIndex, searchResults, searchStatus, selectedPage])
   const selectedOverlay =
     selectedPage?.overlays.find((overlay) => overlay.id === selectedOverlayId) ??
     null
@@ -463,6 +484,23 @@ export function App() {
     },
     [],
   )
+
+  useEffect(() => {
+    if (!editorDocument || sessions.size === 0) return
+    let cancelled = false
+    void import('./pdf/navigation').then(({ documentHasOutline }) =>
+      documentHasOutline(sessionsRef.current, editorDocument).then((value) => {
+        if (cancelled) return
+        setHasOutline(value)
+        if (!value) {
+          setNavigatorMode((mode) => (mode === 'outline' ? 'pages' : mode))
+        }
+      }),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [editorDocument, sessions])
 
   const promptPdfPassword = useCallback((fileName: string, incorrect: boolean) => {
     return new Promise<string | null>((resolve) => {
@@ -531,9 +569,11 @@ export function App() {
         setViewMode('width')
         setNavigatorMode('pages')
         setOutlineEntries([])
+        setHasOutline(false)
         setOutlineStatus('idle')
         setSearchQuery('')
         setSearchResults([])
+        setActiveSearchIndex(0)
         setWatermarkText('')
         setAnnotationTool('select')
         setSelectedOverlayId(null)
@@ -550,6 +590,7 @@ export function App() {
         setOutlineStatus('idle')
         setOutlineEntries([])
         setSearchResults([])
+        setActiveSearchIndex(0)
         setSelectedOverlayId(null)
       }
 
@@ -622,9 +663,11 @@ export function App() {
         setViewMode('width')
         setNavigatorMode('pages')
         setOutlineEntries([])
+        setHasOutline(false)
         setOutlineStatus('idle')
         setSearchQuery('')
         setSearchResults([])
+        setActiveSearchIndex(0)
         setWatermarkText('')
         setAnnotationTool('select')
         setSelectedOverlayId(null)
@@ -641,6 +684,7 @@ export function App() {
         setOutlineStatus('idle')
         setOutlineEntries([])
         setSearchResults([])
+        setActiveSearchIndex(0)
         setSelectedOverlayId(null)
       }
 
@@ -780,9 +824,11 @@ export function App() {
     setViewMode('width')
     setNavigatorMode('pages')
     setOutlineEntries([])
+    setHasOutline(false)
     setOutlineStatus('idle')
     setSearchQuery('')
     setSearchResults([])
+    setActiveSearchIndex(0)
     setWatermarkText('')
     setAnnotationTool('select')
     setSelectedOverlayId(null)
@@ -835,6 +881,29 @@ export function App() {
       })
     },
     [editorDocument, selectedPageId],
+  )
+
+  const focusSearchResult = useCallback(
+    (index: number, results: SearchResult[] = searchResults) => {
+      const result = results[index]
+      if (!result) return
+      setActiveSearchIndex(index)
+      focusPage(result.pageId)
+      if (result.overlayId) {
+        window.requestAnimationFrame(() => setSelectedOverlayId(result.overlayId!))
+      }
+    },
+    [focusPage, searchResults],
+  )
+
+  const stepSearchMatch = useCallback(
+    (direction: 1 | -1) => {
+      if (searchResults.length === 0) return
+      const next =
+        (activeSearchIndex + direction + searchResults.length) % searchResults.length
+      focusSearchResult(next)
+    },
+    [activeSearchIndex, focusSearchResult, searchResults],
   )
 
   const jumpToPosition = useCallback(
@@ -1282,19 +1351,21 @@ export function App() {
     ]
   })()
 
-  const runSearch = useCallback(async () => {
-    if (!editorDocument || !searchQuery.trim()) return
+  const runSearch = useCallback(async (documentOverride?: typeof editorDocument) => {
+    const searchableDocument = documentOverride ?? editorDocument
+    if (!searchableDocument || !searchQuery.trim()) return
     searchAbortRef.current?.abort()
     const controller = new AbortController()
     searchAbortRef.current = controller
     setSearchStatus('searching')
-    setSearchProgress(`0 / ${editorDocument.pages.length}`)
+    setSearchProgress(`0 / ${searchableDocument.pages.length}`)
     setSearchResults([])
+    setActiveSearchIndex(0)
     try {
       const { searchEditorDocument } = await import('./pdf/navigation')
       const results = await searchEditorDocument(
         sessionsRef.current,
-        editorDocument,
+        searchableDocument,
         searchQuery,
         controller.signal,
         (completed, total) => setSearchProgress(`${completed} / ${total}`),
@@ -1302,6 +1373,10 @@ export function App() {
       if (!controller.signal.aborted) {
         setSearchResults(results)
         setSearchStatus('ready')
+        if (results.length > 0) {
+          setActiveSearchIndex(0)
+          focusSearchResult(0, results)
+        }
       }
     } catch (searchError) {
       if (!(searchError instanceof DOMException) || searchError.name !== 'AbortError') {
@@ -1309,7 +1384,7 @@ export function App() {
         setSearchStatus('idle')
       }
     }
-  }, [editorDocument, searchQuery])
+  }, [editorDocument, focusSearchResult, searchQuery])
 
   const analyseDocument = useCallback(async () => {
     if (!editorDocument || busy) return
@@ -1349,6 +1424,25 @@ export function App() {
       } else {
         setSelectedOverlayId(null)
       }
+      if (searchQuery.trim()) {
+        const incoming = new Map<string, PageOverlay[]>()
+        for (const { pageId, overlay } of result.overlays) {
+          const list = incoming.get(pageId) ?? []
+          list.push(overlay)
+          incoming.set(pageId, list)
+        }
+        const searchableDocument = {
+          ...editorDocument,
+          pages: editorDocument.pages.map((page) => ({
+            ...page,
+            overlays: [
+              ...page.overlays.filter((overlay) => !overlay.extracted),
+              ...(incoming.get(page.id) ?? []),
+            ],
+          })),
+        }
+        void runSearch(searchableDocument)
+      }
     } catch (analyseError) {
       if (!(analyseError instanceof DOMException) || analyseError.name !== 'AbortError') {
         setError(userFacingError(analyseError, 'The document text could not be analysed.'))
@@ -1359,7 +1453,7 @@ export function App() {
         setAnalyseProgress('')
       }
     }
-  }, [busy, editorDocument])
+  }, [busy, editorDocument, runSearch, searchQuery])
 
   const showOutline = useCallback(async () => {
     setNavigatorMode('outline')
@@ -1378,6 +1472,13 @@ export function App() {
   }, [editorDocument, outlineStatus])
 
   useEffect(() => {
+    if (searchResults.length === 0) return
+    const result = searchResults[activeSearchIndex]
+    if (!result) return
+    searchResultRefs.current.get(result.id)?.scrollIntoView({ block: 'nearest' })
+  }, [activeSearchIndex, searchResults])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target
       const editable =
@@ -1388,6 +1489,11 @@ export function App() {
 
       if (event.defaultPrevented) return
       if (signatureOpen) return
+      if (command && key === 'g' && searchResults.length > 0) {
+        event.preventDefault()
+        stepSearchMatch(event.shiftKey ? -1 : 1)
+        return
+      }
       if (command && key === 'o') {
         event.preventDefault()
         fileInputRef.current?.click()
@@ -1453,6 +1559,8 @@ export function App() {
     selectedPage,
     signatureOpen,
     pendingSignature,
+    searchResults,
+    stepSearchMatch,
   ])
 
   const openFilePicker = () => fileInputRef.current?.click()
@@ -1674,14 +1782,16 @@ export function App() {
               >
                 <CheckSquare2 size={14} /> Pages
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={navigatorMode === 'outline'}
-                onClick={() => void showOutline()}
-              >
-                <BookOpen size={14} /> Outline
-              </button>
+              {hasOutline && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={navigatorMode === 'outline'}
+                  onClick={() => void showOutline()}
+                >
+                  <BookOpen size={14} /> Bookmarks
+                </button>
+              )}
               <button
                 type="button"
                 role="tab"
@@ -1756,7 +1866,7 @@ export function App() {
                 {outlineStatus === 'loading' ? (
                   <p className="navigator-empty"><LoaderCircle className="spin" size={16} /> Reading outline…</p>
                 ) : outlineEntries.length === 0 ? (
-                  <p className="navigator-empty">This document has no navigable outline.</p>
+                  <p className="navigator-empty">This document has no embedded bookmarks.</p>
                 ) : (
                   <ul className="navigator-results outline-results">
                     {outlineEntries.map((entry) => (
@@ -1803,22 +1913,52 @@ export function App() {
                   <p className="navigator-empty">No matches found.</p>
                 )}
                 {searchResults.length > 0 && (
-                  <ul className="navigator-results search-results">
-                    {searchResults.map((result) => {
-                      const currentPosition = editorDocument.pages.findIndex(
-                        (page) => page.id === result.pageId,
-                      )
-                      if (currentPosition < 0) return null
-                      return (
-                        <li key={result.id}>
-                          <button type="button" onClick={() => focusPage(result.pageId)}>
-                            <strong>Page {currentPosition + 1}</strong>
-                            <span>{result.excerpt}</span>
-                          </button>
-                        </li>
-                      )
-                    })}
-                  </ul>
+                  <>
+                    <div className="search-nav" aria-live="polite">
+                      <span className="search-count">
+                        {activeSearchIndex + 1} of {searchResults.length}{' '}
+                        {searchResults.length === 1 ? 'match' : 'matches'}
+                      </span>
+                      <div className="search-nav-buttons">
+                        <IconButton
+                          label="Previous match"
+                          onClick={() => stepSearchMatch(-1)}
+                        >
+                          <ArrowUp size={15} />
+                        </IconButton>
+                        <IconButton
+                          label="Next match"
+                          onClick={() => stepSearchMatch(1)}
+                        >
+                          <ArrowDown size={15} />
+                        </IconButton>
+                      </div>
+                    </div>
+                    <ul className="navigator-results search-results">
+                      {searchResults.map((result, index) => {
+                        const currentPosition = editorDocument.pages.findIndex(
+                          (page) => page.id === result.pageId,
+                        )
+                        if (currentPosition < 0) return null
+                        return (
+                          <li key={result.id}>
+                            <button
+                              type="button"
+                              className={index === activeSearchIndex ? 'is-active' : ''}
+                              ref={(element) => {
+                                if (element) searchResultRefs.current.set(result.id, element)
+                                else searchResultRefs.current.delete(result.id)
+                              }}
+                              onClick={() => focusSearchResult(index)}
+                            >
+                              <strong>Page {currentPosition + 1}</strong>
+                              <SearchExcerpt excerpt={result.excerpt} query={searchQuery} />
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </>
                 )}
               </div>
             )}
@@ -1952,6 +2092,8 @@ export function App() {
                     }}
                     pendingSignature={pendingSignature}
                     onPlaceSignature={placeSignature}
+                    searchHighlightOverlayIds={searchHighlightOverlayIds}
+                    activeSearchOverlayId={activeSearchOverlayId}
                   />
                 </div>
                 <span className="page-position">
