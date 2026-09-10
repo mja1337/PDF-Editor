@@ -6,13 +6,6 @@ export type MeasureText = (text: string) => number
 /** Fraction of page width/height kept clear of line growth. About 5mm on A4. */
 export const PAGE_EDGE_MARGIN = 0.03
 
-export function overlayAtPageMargin(
-  overlay: Pick<PageOverlay, 'width' | 'x'>,
-  epsilon = 0.002,
-) {
-  return overlay.x + overlay.width >= 1 - PAGE_EDGE_MARGIN - epsilon
-}
-
 export function overlayFontPx(
   overlay: Pick<PageOverlay, 'fontSize'>,
   renderScale: number,
@@ -20,16 +13,27 @@ export function overlayFontPx(
   return Math.max(0.5, (overlay.fontSize ?? 18) * renderScale)
 }
 
-export function overlayFontCss(
-  overlay: Pick<
-    PageOverlay,
-    'extracted' | 'fontItalic' | 'fontRole' | 'fontSize' | 'fontWeight'
-  >,
-  renderScale: number,
-) {
+export type FontFace = Pick<
+  PageOverlay,
+  'extracted' | 'fontItalic' | 'fontRole' | 'fontWeight'
+>
+
+export function fontCssAtPx(overlay: FontFace, fontPx: number) {
   const weight = overlay.fontWeight ?? (overlay.extracted ? 400 : 900)
   const italic = overlay.fontItalic ? 'italic' : 'normal'
-  return `${italic} ${weight} ${overlayFontPx(overlay, renderScale)}px ${cssFontFamily(overlay.fontRole ?? 'sans', weight)}`
+  return `${italic} ${weight} ${fontPx}px ${cssFontFamily(overlay.fontRole ?? 'sans', weight)}`
+}
+
+export function overlayFontCss(
+  overlay: FontFace & Pick<PageOverlay, 'fontSize'>,
+  renderScale: number,
+) {
+  return fontCssAtPx(overlay, overlayFontPx(overlay, renderScale))
+}
+
+/** Inner padding for an extracted line, in the same units as fontPx. */
+export function extractedPadPx(fontPx: number) {
+  return { x: fontPx * 0.08, y: fontPx * 0.14 }
 }
 
 export function overlayPadPx(
@@ -37,11 +41,7 @@ export function overlayPadPx(
   renderScale: number,
 ) {
   if (!overlay.extracted) return { x: Math.max(0.25, 2 * renderScale), y: 0 }
-  const fontPx = overlayFontPx(overlay, renderScale)
-  return {
-    x: fontPx * 0.08,
-    y: fontPx * 0.14,
-  }
+  return extractedPadPx(overlayFontPx(overlay, renderScale))
 }
 
 export function createCanvasMeasurer(font: string): MeasureText {
@@ -53,6 +53,19 @@ export function createCanvasMeasurer(font: string): MeasureText {
   if (!context) return (text) => text.length * 8
   context.font = font
   return (text) => context.measureText(text).width
+}
+
+/** Measures text at any size for the same typeface, for fit-and-shrink layout. */
+export function createCanvasSizeMeasurer(overlay: FontFace) {
+  if (typeof document === 'undefined') {
+    return (text: string, fontSize: number) => text.length * fontSize * 0.5
+  }
+  const context = document.createElement('canvas').getContext('2d')
+  if (!context) return (text: string, fontSize: number) => text.length * fontSize * 0.5
+  return (text: string, fontSize: number) => {
+    context.font = fontCssAtPx(overlay, fontSize)
+    return context.measureText(text).width
+  }
 }
 
 export function caretIndexAtX(text: string, x: number, measure: MeasureText) {
@@ -95,6 +108,7 @@ export function wrapTextToWidth(text: string, maxWidth: number, measure: Measure
   return lines.length > 0 ? lines : ['']
 }
 
+/** Sizes a free-standing text note. Analysed lines use fitExtractedText instead. */
 export function fitOverlayToText(
   overlay: Pick<PageOverlay, 'extracted' | 'fontSize' | 'height' | 'width' | 'x' | 'y'>,
   text: string,
@@ -104,14 +118,10 @@ export function fitOverlayToText(
   measure: MeasureText,
 ) {
   const fontPx = overlayFontPx(overlay, renderScale)
-  const lineHeightPx = fontPx * (overlay.extracted ? 1 : 1.15)
-  const pad = overlayPadPx(overlay, renderScale)
-  const minWidthPx = overlay.extracted
-    ? overlay.width * pageWidth
-    : fontPx * 0.35 + pad.x * 2
-  const minHeightPx = overlay.extracted
-    ? overlay.height * pageHeight
-    : lineHeightPx + pad.y * 2
+  const lineHeightPx = fontPx * 1.15
+  const pad = overlayPadPx({ ...overlay, extracted: false }, renderScale)
+  const minWidthPx = fontPx * 0.35 + pad.x * 2
+  const minHeightPx = lineHeightPx + pad.y * 2
   const maxWidthPx = Math.max(
     minWidthPx,
     (1 - PAGE_EDGE_MARGIN - overlay.x) * pageWidth,
@@ -121,15 +131,9 @@ export function fitOverlayToText(
     (1 - PAGE_EDGE_MARGIN - overlay.y) * pageHeight,
   )
   const innerMax = Math.max(1, maxWidthPx - pad.x * 2)
-  const sample = text.length > 0 ? text : ' '
-  const unwrapped = overlay.extracted ? sample.replace(/\s+/g, ' ').trim() || ' ' : sample
-  const unwrappedWidth = measure(unwrapped) + pad.x * 2 + 4
-  const fitsOnLine = overlay.extracted && unwrappedWidth <= maxWidthPx
-  const lines = fitsOnLine ? [unwrapped] : wrapTextToWidth(unwrapped, innerMax, measure)
+  const lines = wrapTextToWidth(text.length > 0 ? text : ' ', innerMax, measure)
   const contentWidth = Math.max(0, ...lines.map((line) => measure(line))) + pad.x * 2 + 4
-  const widthPx = overlay.extracted && !fitsOnLine
-    ? maxWidthPx
-    : Math.min(maxWidthPx, Math.max(minWidthPx, contentWidth))
+  const widthPx = Math.min(maxWidthPx, Math.max(minWidthPx, contentWidth))
   const heightPx = Math.min(
     maxHeightPx,
     Math.max(minHeightPx, lines.length * lineHeightPx + pad.y * 2),

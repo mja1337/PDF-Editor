@@ -3,7 +3,13 @@ import type { EditorDocument, PageOverlay, QuarterTurn } from '../domain/documen
 import { createExtractedOverlay } from '../domain/overlays'
 import type { PdfSession } from './engine'
 import { classifyPdfFont } from './fontMatch'
-import { sampleNormalizedRect } from './pageSample'
+import { sampleCellInk, sampleNormalizedRect, type PixelBuffer } from './pageSample'
+import {
+  colorsToSegments,
+  hasDistinctInk,
+  type ColorSegment,
+} from './inkSegments'
+import { createCanvasSizeMeasurer } from './textLayout'
 import { ocrRenderedPage } from './ocr'
 import type { OcrMode } from './ocrEngine'
 import {
@@ -94,6 +100,50 @@ function runsFromTextContent(
   return groupTextRuns(runs)
 }
 
+/**
+ * Reads the ink colour of each glyph in a line. Character positions come from the
+ * matched face, then are rescaled so the last glyph lands on the run's real right
+ * edge -- that removes the systematic drift between the matched font's metrics and
+ * the font the PDF actually used, which is what would otherwise colour the wrong
+ * characters.
+ */
+function sampleRunInk(
+  image: PixelBuffer,
+  run: ExtractedTextRun,
+  appearance: { color: string; backgroundColor: string },
+): ColorSegment[] | undefined {
+  const characters = Array.from(run.text)
+  if (characters.length < 2 || run.width <= 0) return undefined
+  const measure = createCanvasSizeMeasurer({ ...run, extracted: true })
+  const total = measure(run.text, 100)
+  if (!(total > 0)) return undefined
+
+  const colors: string[] = []
+  let cursor = 0
+  for (const character of characters) {
+    const advance = measure(character, 100) / total
+    const start = cursor
+    cursor = Math.min(1, cursor + advance)
+    if (character === ' ') {
+      colors.push(appearance.color)
+      continue
+    }
+    const ink = sampleCellInk(
+      image,
+      {
+        x: run.x + start * run.width,
+        y: run.y,
+        width: Math.max(1 / image.width, (cursor - start) * run.width),
+        height: run.height,
+      },
+      appearance.backgroundColor,
+    )
+    colors.push(ink ?? appearance.color)
+  }
+  if (!hasDistinctInk(colors)) return undefined
+  return colorsToSegments(run.text, colors)
+}
+
 async function sampleRunAppearance(
   page: PDFPageProxy,
   rotation: number,
@@ -124,6 +174,7 @@ async function sampleRunAppearance(
         ...run,
         color: appearance.color,
         backgroundColor: appearance.backgroundColor,
+        colorSegments: sampleRunInk(image, run, appearance),
       }
     })
   } catch {

@@ -1,3 +1,5 @@
+import { remapSegments, type ColorSegment } from '../pdf/inkSegments'
+
 export type QuarterTurn = 0 | 90 | 180 | 270
 
 export type OverlayType =
@@ -51,6 +53,12 @@ export interface PageOverlay {
   scanned?: boolean
   cover?: boolean
   backgroundColor?: string
+  /** Geometry an extracted line was analysed with, so edits can resize both ways. */
+  source?: { width: number; height: number; fontSize: number }
+  /** Set when a replacement will not fit even at the smallest allowed size. */
+  overflow?: boolean
+  /** Per-character ink, so a coloured mark inside a line survives an edit. */
+  colorSegments?: ColorSegment[]
 }
 
 export interface PageRef {
@@ -335,6 +343,19 @@ export function documentReducer(
                 overlays: page.overlays.map((overlay) => {
                   if (overlay.id !== action.overlayId) return overlay
                   const next = { ...overlay, ...action.changes }
+                  if (
+                    'text' in action.changes &&
+                    action.changes.text !== overlay.text &&
+                    overlay.colorSegments &&
+                    !('colorSegments' in action.changes)
+                  ) {
+                    next.colorSegments = remapSegments(
+                      overlay.text ?? '',
+                      overlay.colorSegments,
+                      action.changes.text ?? '',
+                      overlay.color,
+                    )
+                  }
                   if (overlay.extracted && !overlay.edited) {
                     const textChanged =
                       'text' in action.changes && action.changes.text !== overlay.text

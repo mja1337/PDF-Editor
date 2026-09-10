@@ -70,23 +70,80 @@ input:focus-visible,
 }
 
 .app-shell {
+  position: relative;
   height: 100dvh;
   display: grid;
-  grid-template-rows: 68px auto minmax(0, 1fr) 30px;
+  grid-template-rows: minmax(0, 1fr) 26px;
   background: var(--ink-900);
 }
 
-.topbar {
-  position: relative;
-  z-index: 20;
-  display: grid;
-  grid-template-columns: 272px minmax(0, 1fr) auto;
+/* Floating card shared by every control cluster. */
+.island {
+  display: flex;
   align-items: center;
-  min-width: 0;
-  padding: 0 18px;
+  gap: 2px;
+  padding: 4px;
+  color: #e9efec;
+  background: rgba(13, 19, 17, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(12px);
+}
+
+/* Centred on the page area, on the same axis as the view controls below. */
+.island-tools {
+  position: absolute;
+  z-index: 8;
+  top: 14px;
+  left: 50%;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(560px, 100% - 24px);
+  transform: translateX(-50%);
+}
+
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 33px;
+  height: 33px;
+  min-height: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.tool-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tool-chip.is-active {
+  color: var(--accent);
+  background: rgba(53, 185, 166, 0.16);
+}
+
+.topbar {
+  position: absolute;
+  z-index: 30;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
   color: #f7f8f6;
-  background: var(--ink-950);
-  border-bottom: 1px solid var(--line-dark);
+  pointer-events: none;
+}
+
+.topbar > * {
+  pointer-events: auto;
 }
 
 .brand-lockup,
@@ -101,10 +158,6 @@ input:focus-visible,
   align-items: center;
 }
 
-.brand-lockup {
-  gap: 10px;
-}
-
 .brand-mark {
   display: grid;
   width: 32px;
@@ -115,22 +168,9 @@ input:focus-visible,
   border-radius: 8px;
 }
 
-.brand-lockup > strong {
-  font-size: 0.98rem;
-  letter-spacing: 0.16em;
-  font-weight: 800;
-}
-
 .toolbar {
   gap: 5px;
   min-width: 0;
-}
-
-.toolbar-divider {
-  width: 1px;
-  height: 24px;
-  margin: 0 5px;
-  background: var(--line-dark);
 }
 
 .icon-button,
@@ -146,29 +186,17 @@ input:focus-visible,
   cursor: pointer;
 }
 
-.icon-button,
-.toolbar-button {
-  color: #dce2df;
-  background: transparent;
-  border-radius: 8px;
-}
-
 .icon-button {
   display: inline-grid;
   width: 36px;
   height: 36px;
   place-items: center;
+  color: #dce2df;
+  background: transparent;
+  border-radius: 8px;
 }
 
-.toolbar-button {
-  gap: 8px;
-  height: 38px;
-  padding: 0 12px;
-  font-size: 0.82rem;
-}
-
-.icon-button:hover:not(:disabled),
-.toolbar-button:hover {
+.icon-button:hover:not(:disabled) {
   color: #fff;
   background: rgba(255, 255, 255, 0.07);
 }
@@ -180,11 +208,6 @@ input:focus-visible,
 .delete-button:disabled {
   cursor: not-allowed;
   opacity: 0.35;
-}
-
-.topbar-actions {
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .export-button,
@@ -302,14 +325,6 @@ input:focus-visible,
   color: #edf1ef;
 }
 
-.panel-kicker {
-  margin: 0;
-  color: var(--accent);
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-}
-
 .welcome-panel h1 {
   margin: 0 0 10px;
   font-size: 1.7rem;
@@ -373,8 +388,9 @@ input:focus-visible,
 }
 
 .workspace {
+  position: relative;
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr) 248px;
+  grid-template-columns: 204px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -388,7 +404,8 @@ input:focus-visible,
 
 .page-rail {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding-top: 56px;
   border-right: 1px solid var(--line-dark);
 }
 
@@ -573,36 +590,16 @@ input:focus-visible,
 }
 
 .inspector {
-  padding: 0 16px 18px;
+  position: absolute;
+  z-index: 25;
+  top: 60px;
+  right: 12px;
+  display: block;
+  width: 268px;
+  max-height: calc(100% - 124px);
+  padding: 10px 12px 12px;
   overflow-y: auto;
-  border-left: 1px solid var(--line-dark);
-}
-
-.panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 75px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line-dark);
-}
-
-.panel-heading h2 {
-  margin: 4px 0 0;
-  font-size: 1rem;
-  letter-spacing: -0.01em;
-}
-
-.count-badge {
-  display: grid;
-  min-width: 28px;
-  height: 24px;
-  place-items: center;
-  color: #d3ded9;
-  background: var(--ink-700);
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
+  background: rgba(13, 19, 17, 0.93);
 }
 
 .thumbnail-list {
@@ -695,29 +692,29 @@ input:focus-visible,
   color: #eff8f5;
 }
 
-.rail-hint {
-  gap: 7px;
-  min-height: 34px;
-  justify-content: center;
-  color: #70827b;
-  border-top: 1px solid var(--line-dark);
-  font-size: 0.66rem;
-}
-
 .document-stage {
   position: relative;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
+  background: #ccd0ca;
+}
+
+/* The page scrolls inside this; the islands sit outside it and stay put. */
+.stage-scroll {
+  position: absolute;
+  inset: 0;
+  padding-top: 52px;
   overflow: auto;
   scrollbar-gutter: stable;
-  background: #ccd0ca;
 }
 
 .view-controls {
   position: absolute;
   z-index: 8;
-  top: 12px;
+  bottom: 14px;
   left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 3px;
@@ -728,7 +725,6 @@ input:focus-visible,
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 11px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
-  transform: translateX(-50%);
   backdrop-filter: blur(12px);
 }
 
@@ -774,8 +770,8 @@ input:focus-visible,
 }
 
 .stage-grid {
-  position: fixed;
-  inset: 68px 248px 30px 272px;
+  position: absolute;
+  inset: 0;
   pointer-events: none;
   opacity: 0.34;
   background-image: radial-gradient(rgba(20, 34, 29, 0.22) 0.7px, transparent 0.7px);
@@ -867,42 +863,17 @@ input:focus-visible,
   pointer-events: none;
 }
 
-.annotation-layer.is-interactive.tool-redaction {
+.redaction-layer {
   cursor: crosshair;
 }
 
-.annotation-layer.is-interactive.tool-redaction .annotation {
+.redaction-layer .annotation {
   pointer-events: none;
 }
 
-.annotation-layer.is-interactive.tool-redaction .annotation.is-draft {
-  pointer-events: none;
-}
-
-.annotation-layer.is-interactive.tool-redaction .annotation-extracted:not(.is-edited) {
-  outline-color: transparent;
-}
-
-.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction).is-selected,
-.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction).is-hovered {
-  z-index: 1;
-}
-
-.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-resize-handle,
-.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-selection-frame,
-.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-selection-edge,
-.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-hover-edge {
-  display: none;
-}
-
-.annotation-layer.is-interactive:not(.tool-select):not(.tool-eraser):not(.tool-highlight):not(.tool-underline):not(.tool-strikeout):not(.tool-redaction) .annotation:not(.annotation-extracted) {
+.annotation-layer.is-interactive:not(.tool-select):not(.tool-eraser):not(.tool-highlight):not(.tool-underline):not(.tool-strikeout) .annotation:not(.annotation-extracted) {
   pointer-events: auto;
   cursor: move;
-}
-
-.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) {
-  visibility: hidden;
-  pointer-events: none;
 }
 
 .annotation.is-selected {
@@ -960,24 +931,16 @@ input:focus-visible,
   visibility: hidden;
 }
 
-.annotation-extracted.is-edited {
-  overflow: hidden;
-}
-
-.annotation-extracted.is-edited .annotation-text {
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.annotation-extracted.is-at-margin.is-edited .annotation-text,
-.annotation-extracted.is-at-margin.is-editing .annotation-text-editor {
+/* The box is fitted to the text before it renders, so wrapping never clips. */
+.annotation-extracted.is-edited .annotation-text,
+.annotation-extracted.is-editing .annotation-text-editor {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.annotation-extracted.is-editing:not(.is-at-margin) .annotation-text-editor {
-  white-space: nowrap;
-  overflow-wrap: normal;
+.annotation-extracted.is-overflowing {
+  outline: 1.5px solid #d9534f;
+  outline-offset: 1px;
 }
 
 .annotation-extracted.annotation-scanned.is-edited .annotation-text,
@@ -1036,23 +999,23 @@ input:focus-visible,
 }
 
 .annotation-redaction {
-  z-index: 5;
+  z-index: 10;
   outline: 1px dashed rgba(216, 107, 97, 0.72);
   background: transparent;
 }
 
 .annotation-redaction.is-selected {
-  z-index: 6;
+  z-index: 11;
   outline: 2px solid rgba(216, 107, 97, 0.88);
 }
 
 .annotation-redaction.is-hovered {
-  z-index: 6;
+  z-index: 11;
   outline: 2px dashed rgba(216, 107, 97, 0.82);
 }
 
 .annotation.is-draft.annotation-redaction {
-  z-index: 7;
+  z-index: 12;
 }
 
 .annotation-redaction-fill {
@@ -1186,6 +1149,7 @@ input:focus-visible,
   stroke-width: 4;
   opacity: 0.38;
   pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
 .annotation-hover-edge {
@@ -1195,6 +1159,7 @@ input:focus-visible,
   opacity: 0.28;
   stroke-dasharray: 6 4;
   pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
 .annotation-selection-box {
@@ -1203,6 +1168,7 @@ input:focus-visible,
   stroke-width: 1.4;
   stroke-dasharray: 5 3;
   pointer-events: none;
+  vector-effect: non-scaling-stroke;
 }
 
 .annotation-selection-frame {
@@ -1284,14 +1250,6 @@ input:focus-visible,
   backdrop-filter: blur(8px);
 }
 
-.inspector-heading {
-  margin: 0 -16px 10px;
-}
-
-.inspector-heading > svg {
-  color: var(--accent);
-}
-
 .tool-section {
   padding: 15px 0;
   border-bottom: 1px solid var(--line-dark);
@@ -1309,28 +1267,6 @@ input:focus-visible,
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-.annotation-tool-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
-}
-
-.annotation-tool-grid button {
-  flex-direction: column;
-  gap: 3px;
-  min-height: 46px;
-  padding: 6px 2px 5px;
-  font-size: 0.58rem;
-  line-height: 1.15;
-}
-
-.annotation-tool-grid button span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .annotation-tool-grid button.is-active,
@@ -1373,25 +1309,6 @@ input:focus-visible,
   resize: vertical;
 }
 
-.analyse-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 38px;
-  color: #cffff4;
-  background: rgba(53, 185, 166, 0.16);
-  border: 1px solid rgba(53, 185, 166, 0.42);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.analyse-button:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
 .text-analysis-tools .tool-hint {
   text-align: left;
 }
@@ -1404,29 +1321,88 @@ input:focus-visible,
   list-style: none;
 }
 
-.extracted-text-list button.extracted-text-item {
-  display: block;
-  width: 100%;
-  min-height: 0;
-  padding: 7px 8px;
-  overflow: hidden;
-  color: #d5e4df;
-  text-align: left;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  line-height: 1.35;
+.extracted-text-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  align-items: start;
+  padding: 4px;
   background: #111a17;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 7px;
+}
+
+.extracted-text-row.is-active {
+  border-color: rgba(53, 185, 166, 0.48);
+  background: rgba(53, 185, 166, 0.14);
+}
+
+.extracted-text-row.is-overflowing {
+  border-color: rgba(217, 83, 79, 0.55);
+}
+
+.extracted-text-warning {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 5px;
+  align-items: center;
+  margin: 0;
+  padding: 2px 5px 1px;
+  color: #f0a9a6;
+  font-size: 0.66rem;
+  line-height: 1.3;
+}
+
+.extracted-text-warning svg {
+  flex: none;
+}
+
+.extracted-text-row textarea {
+  width: 100%;
+  min-height: 0;
+  padding: 3px 5px;
+  color: #d5e4df;
+  font-family: inherit;
   font-size: 0.72rem;
+  line-height: 1.35;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  resize: vertical;
+}
+
+.extracted-text-row.is-edited textarea {
+  color: #cffff4;
+}
+
+.extracted-text-row textarea:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.extracted-text-row textarea:focus-visible {
+  background: #0c1512;
+  border-color: rgba(53, 185, 166, 0.6);
+  outline: none;
+}
+
+.extracted-text-locate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  min-height: 0;
+  height: 26px;
+  padding: 0;
+  color: #9fb3ac;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
   cursor: pointer;
 }
 
-.extracted-text-list button.extracted-text-item.is-active {
+.extracted-text-locate:hover {
   color: #cffff4;
-  border-color: rgba(53, 185, 166, 0.48);
-  background: rgba(53, 185, 166, 0.14);
+  border-color: rgba(53, 185, 166, 0.4);
 }
 
 .color-control {
@@ -1603,7 +1579,8 @@ input:focus-visible,
   position: fixed;
   z-index: 50;
   right: 18px;
-  bottom: 46px;
+  /* Clears the centred view controls at the foot of the page area. */
+  bottom: 92px;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -1939,21 +1916,12 @@ input:focus-visible,
 }
 
 @media (max-width: 1040px) {
-  .topbar {
-    grid-template-columns: 236px minmax(0, 1fr) auto;
-  }
-
   .workspace {
     grid-template-columns: 236px minmax(0, 1fr);
   }
 
   .inspector {
     display: none;
-  }
-
-  .stage-grid {
-    right: 0;
-    left: 236px;
   }
 
   .mobile-page-actions {
@@ -2000,12 +1968,6 @@ input:focus-visible,
     padding-left: 6px;
   }
 
-  .toolbar-button {
-    width: 36px;
-    padding: 0;
-    justify-content: center;
-  }
-
   .export-button {
     padding: 0 11px;
   }
@@ -2021,11 +1983,6 @@ input:focus-visible,
     flex: 0 0 170px;
     border-top: 1px solid var(--line-dark);
     border-right: 0;
-  }
-
-  .page-rail .panel-heading,
-  .rail-hint {
-    display: none;
   }
 
   .thumbnail-list {
@@ -2129,4 +2086,57 @@ input:focus-visible,
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.popover {
+  position: absolute;
+  z-index: 40;
+  top: 60px;
+  right: 12px;
+  display: grid;
+  gap: 8px;
+  width: 244px;
+  padding: 12px;
+  color: #e9efec;
+  background: rgba(13, 19, 17, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+}
+
+.popover .tool-section {
+  padding: 0;
+  border: 0;
+}
+
+.navigator-note {
+  margin: 0;
+  padding: 8px 10px 0;
+  color: #93a49e;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.text-panel {
+  padding: 0 8px 10px;
+}
+
+/* Option rows wrap instead of overflowing the panel. */
+.inspector .property-options,
+.inspector .annotation-actions,
+.inspector .paint-size-chips,
+.inspector .paint-swatches {
+  flex-wrap: wrap;
+}
+
+.inspector .property-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.inspector .property-options > button,
+.inspector .button-grid > button {
+  min-width: 0;
+  flex: 1 1 auto;
 }

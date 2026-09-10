@@ -13,6 +13,12 @@ import {
 } from './coordinates'
 import { stampDisplayRect } from './stamp'
 import { overlayPadPx, wrapTextToWidth } from './textLayout'
+import { EXTRACTED_LINE_HEIGHT, layoutExtractedLines } from './extractedTextFit'
+import {
+  lineColorSegments,
+  normalizeColoredText,
+  segmentsToColors,
+} from './inkSegments'
 import { arrowHeadPolygon, arrowHeadSize, lineEndpoints, lineSketchRoughness, overlayDisplayPoint } from './shapeGeometry'
 import { sketchClosedInPixels, sketchLineBetween, sketchStrokes } from './sketch'
 import { closedShapeFill, isClosedDrawShape } from '../domain/overlays'
@@ -233,7 +239,7 @@ export async function exportPdf(
       const quarterTurn = rotation as QuarterTurn
       const covered = overlay.type === 'text' && overlay.extracted && overlay.edited
       const rect = overlayToPdfRect(
-        covered ? { ...overlay, ...coverBox(overlay) } : overlay,
+        covered ? { ...overlay, ...coverBox(overlay, pageReference.overlays) } : overlay,
         pageWidth,
         pageHeight,
         quarterTurn,
@@ -325,14 +331,16 @@ export async function exportPdf(
         let fontSize = overlay.fontSize ?? 18
         const pad = overlayPadPx(overlay, 1)
         const maxWidth = Math.max(1, overlay.width * display.width - pad.x * 2)
-        const lineHeight = fontSize * (overlay.extracted ? 1 : 1.15)
+        const lineHeight = fontSize * (overlay.extracted ? EXTRACTED_LINE_HEIGHT : 1.15)
         let lines: string[]
         if (overlay.extracted) {
-          const line = text.replace(/\s+/g, ' ').trim()
-          lines =
-            font.widthOfTextAtSize(line, fontSize) <= maxWidth
-              ? [line]
-              : wrapTextToWidth(line, maxWidth, (value) => font.widthOfTextAtSize(value, fontSize))
+          // Same wrap the editor previewed, so the file matches the screen.
+          lines = layoutExtractedLines(
+            text,
+            overlay.width * display.width,
+            fontSize,
+            (value, size) => font.widthOfTextAtSize(value, size),
+          )
         } else if (text.includes('\n')) {
           lines = wrapTextToWidth(
             text,
@@ -345,29 +353,54 @@ export async function exportPdf(
           }
           lines = [text]
         }
+        // A line can carry more than one ink, such as a red mark on a black label.
+        const inked =
+          overlay.extracted && overlay.colorSegments
+            ? normalizeColoredText(
+                overlay.text ?? '',
+                segmentsToColors(overlay.colorSegments),
+              )
+            : null
+        const inkedLines = inked ? lineColorSegments(inked.text, inked.colors, lines) : null
+        const drawPiece = (
+          value: string,
+          textX: number,
+          textY: number,
+          fill = color,
+          size = fontSize,
+        ) => {
+          const anchor = displayPointToPdf(
+            { x: textX, y: textY },
+            pageWidth,
+            pageHeight,
+            quarterTurn,
+          )
+          page.drawText(value, {
+            x: anchor.x,
+            y: anchor.y,
+            size,
+            font,
+            color: fill,
+            opacity: overlay.opacity,
+            rotate: degrees(rotation),
+          })
+        }
         for (let index = 0; index < lines.length; index += 1) {
           const line = lines[index]
           if (!line) continue
           const baseX = overlay.x * display.width + pad.x
           const baseY = overlay.y * display.height + pad.y + fontSize + index * lineHeight
-          const drawAt = (textX: number, textY: number, fill = color, size = fontSize) => {
-            const anchor = displayPointToPdf(
-              { x: textX, y: textY },
-              pageWidth,
-              pageHeight,
-              quarterTurn,
-            )
-            page.drawText(line, {
-              x: anchor.x,
-              y: anchor.y,
-              size,
-              font,
-              color: fill,
-              opacity: overlay.opacity,
-              rotate: degrees(rotation),
-            })
+          const pieces = inkedLines?.[index]
+          if (pieces && pieces.length > 0) {
+            let offset = 0
+            for (const piece of pieces) {
+              const [pieceRed, pieceGreen, pieceBlue] = colorComponents(piece.color)
+              drawPiece(piece.text, baseX + offset, baseY, rgb(pieceRed, pieceGreen, pieceBlue))
+              offset += font.widthOfTextAtSize(piece.text, fontSize)
+            }
+          } else {
+            drawPiece(line, baseX, baseY)
           }
-          drawAt(baseX, baseY)
         }
       } else if (overlay.type === 'highlight') {
         page.drawRectangle({

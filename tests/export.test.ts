@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createEditorDocument, documentReducer, initialHistory } from '../src/domain/document'
 import { exportPdf } from '../src/pdf/export'
 import { readFileSync } from 'node:fs'
+import { inflateSync } from 'node:zlib'
 
 const fontBytes = new Uint8Array(readFileSync('node_modules/@fontsource/noto-sans/files/noto-sans-latin-700-normal.woff'))
 
@@ -15,7 +16,59 @@ async function createSourcePdf() {
   return source.save()
 }
 
+/** Content streams are Flate-compressed, so operators need inflating to read. */
+function pdfOperators(bytes: Uint8Array) {
+  const buffer = Buffer.from(bytes)
+  const raw = buffer.toString('latin1')
+  let text = raw
+  for (const match of raw.matchAll(/stream\r?\n/g)) {
+    const start = match.index! + match[0].length
+    const end = raw.indexOf('endstream', start)
+    if (end < 0) continue
+    try {
+      text += inflateSync(buffer.subarray(start, end)).toString('latin1')
+    } catch {
+      // Not every stream is Flate-compressed.
+    }
+  }
+  return text
+}
+
+function fillColors(bytes: Uint8Array) {
+  return [...pdfOperators(bytes).matchAll(/([\d.]+) ([\d.]+) ([\d.]+) rg/g)].map((match) =>
+    [Number(match[1]), Number(match[2]), Number(match[3])] as const,
+  )
+}
+
 describe('exportPdf', () => {
+  it('draws each ink of an analysed line, so a coloured mark survives an edit', async () => {
+    const source = await PDFDocument.create()
+    source.addPage([400, 300])
+    const sourceBytes = await source.save()
+    const document = createEditorDocument('mark.pdf', sourceBytes.length, 1, 'mark')
+    document.pages[0].overlays = [{
+      id: 'line', type: 'text', x: 0.1, y: 0.2, width: 0.5, height: 0.06,
+      color: '#141414', opacity: 1, strokeWidth: 1, fontSize: 18,
+      text: 'Customer name *', extracted: true, edited: true, cover: true,
+      backgroundColor: '#ffffff',
+      colorSegments: [
+        { text: 'Customer name ', color: '#141414' },
+        { text: '*', color: '#d62828' },
+      ],
+    }]
+    const sources = new Map([['mark', sourceBytes]])
+    const colors = fillColors(await exportPdf(sources, document, fontBytes))
+    const red = colors.find(([r, g, b]) => r > 0.7 && g < 0.3 && b < 0.3)
+    const body = colors.find(([r, g, b]) => r < 0.2 && g < 0.2 && b < 0.2)
+    expect(body, JSON.stringify(colors)).toBeDefined()
+    expect(red, JSON.stringify(colors)).toBeDefined()
+
+    // Without the per-character ink the whole line is painted in one colour.
+    delete document.pages[0].overlays[0].colorSegments
+    const flat = fillColors(await exportPdf(sources, document, fontBytes))
+    expect(flat.some(([r, g, b]) => r > 0.7 && g < 0.3 && b < 0.3)).toBe(false)
+  })
+
   it('preserves supported Unicode and rejects unsupported text instead of substituting characters', async () => {
     const sourceBytes = await createSourcePdf()
     const document = createEditorDocument('unicode.pdf', sourceBytes.length, 3, 'unicode')
