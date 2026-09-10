@@ -38,12 +38,55 @@ import { sketchClosedInPixels, sketchLineBetween, sketchStrokes } from '../pdf/s
 import {
   caretIndexAtX,
   createCanvasMeasurer,
+  createCanvasSizeMeasurer,
   fitOverlayToText,
-  overlayAtPageMargin,
   overlayFontCss,
   overlayFontPx,
   overlayPadPx,
 } from '../pdf/textLayout'
+import { extractedFitBounds, fitExtractedText } from '../pdf/extractedTextFit'
+import { segmentsToColors } from '../pdf/inkSegments'
+
+export interface FittedSize {
+  width: number
+  height: number
+  fontSize?: number
+  overflow?: boolean
+}
+
+/**
+ * Analysed lines grow into the free space around them and shrink their type
+ * before they would spill; everything else keeps the simpler box fit.
+ */
+function fitOverlayBox(
+  overlay: PageOverlay,
+  text: string,
+  overlays: readonly PageOverlay[],
+  pageWidth: number,
+  pageHeight: number,
+  renderScale: number,
+  measureAtSize: (value: string, fontSize: number) => number,
+  measureFixed: (value: string) => number,
+): FittedSize {
+  if (!overlay.extracted) {
+    return fitOverlayToText(overlay, text, pageWidth, pageHeight, renderScale, measureFixed)
+  }
+  const scale = Math.max(renderScale, 0.0001)
+  const fit = fitExtractedText({
+    overlay,
+    text,
+    bounds: extractedFitBounds(overlay, overlays as PageOverlay[]),
+    pageWidth: pageWidth / scale,
+    pageHeight: pageHeight / scale,
+    measure: measureAtSize,
+  })
+  return {
+    width: fit.width,
+    height: fit.height,
+    fontSize: fit.fontSize,
+    overflow: fit.overflow,
+  }
+}
 
 export type AnnotationTool = 'select' | 'eraser' | OverlayType
 
@@ -111,7 +154,6 @@ const DRAW_TOOLS = new Set<AnnotationTool>([
   'line',
   'arrow',
   'diamond',
-  'redaction',
 ])
 
 function toolCanGrabMarks(tool: AnnotationTool) {
@@ -123,7 +165,6 @@ function isLineMarkTool(tool: AnnotationTool) {
 }
 
 function overlayCanStartMove(tool: AnnotationTool, overlay: PageOverlay) {
-  if (tool === 'redaction') return false
   if (tool === 'eraser') return !(overlay.extracted && !overlay.edited)
   if (isLineMarkTool(tool) && overlay.extracted) return false
   return toolCanGrabMarks(tool)
@@ -587,6 +628,25 @@ function textLabel(overlay: PageOverlay) {
   return overlay.text || 'Add text'
 }
 
+/** Draws each stretch of the line in its own ink, so coloured marks survive. */
+function TextLabel({ overlay }: { overlay: PageOverlay }) {
+  const label = textLabel(overlay)
+  if (!label) return null
+  const segments = overlay.colorSegments
+  if (!segments || segmentsToColors(segments).length !== Array.from(label).length) {
+    return <>{label}</>
+  }
+  return (
+    <>
+      {segments.map((segment, index) => (
+        <span key={index} style={{ color: segment.color }}>
+          {segment.text}
+        </span>
+      ))}
+    </>
+  )
+}
+
 function OverlayContent({
   overlay,
   renderScale,
@@ -659,7 +719,9 @@ function OverlayContent({
     case 'text':
       return (
         <>
-          <span className="annotation-text">{textLabel(overlay)}</span>
+          <span className="annotation-text">
+            <TextLabel overlay={overlay} />
+          </span>
           {emphasis !== 'none' ? (
             <svg className="annotation-selection-frame" viewBox="0 0 1 1" preserveAspectRatio="none">
               <rect
@@ -718,6 +780,7 @@ function OverlayContent({
 
 function TextEditor({
   overlay,
+  overlays,
   renderScale,
   pageWidth,
   pageHeight,
@@ -727,24 +790,24 @@ function TextEditor({
   onCancel,
 }: {
   overlay: PageOverlay
+  overlays: readonly PageOverlay[]
   renderScale: number
   pageWidth: number
   pageHeight: number
   caretIndex: number | null
-  onPreview: (size: { width: number; height: number }) => void
-  onSave: (text: string, size: { width: number; height: number }) => void
+  onPreview: (size: FittedSize) => void
+  onSave: (text: string, size: FittedSize) => void
   onCancel: () => void
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const valueRef = useRef(overlay.text ?? '')
   const measure = useRef(createCanvasMeasurer(overlayFontCss(overlay, renderScale)))
-  const layoutRef = useRef({ width: overlay.width, height: overlay.height })
+  const measureAtSize = useRef(createCanvasSizeMeasurer(overlay))
+  const layoutRef = useRef<FittedSize>({ width: overlay.width, height: overlay.height })
   const finished = useRef(false)
   const allowBlur = useRef(false)
   const onSaveRef = useRef(onSave)
-  const [wrapAtMargin, setWrapAtMargin] = useState(
-    !overlay.extracted || overlayAtPageMargin(overlay),
-  )
+  const overlaysRef = useRef(overlays)
 
   useEffect(() => {
     onSaveRef.current = onSave
@@ -752,15 +815,22 @@ function TextEditor({
 
   useEffect(() => {
     measure.current = createCanvasMeasurer(overlayFontCss(overlay, renderScale))
+    measureAtSize.current = createCanvasSizeMeasurer(overlay)
   }, [overlay, renderScale])
 
   useEffect(() => {
-    const size = fitOverlayToText(
+    overlaysRef.current = overlays
+  }, [overlays])
+
+  useEffect(() => {
+    const size = fitOverlayBox(
       overlay,
       overlay.text ?? '',
+      overlaysRef.current,
       pageWidth,
       pageHeight,
       renderScale,
+      measureAtSize.current,
       measure.current,
     )
     layoutRef.current = size
@@ -808,21 +878,18 @@ function TextEditor({
       onInput={(event) => {
         const value = event.currentTarget.value
         valueRef.current = value
-        const size = fitOverlayToText(
+        const size = fitOverlayBox(
           overlay,
           value,
+          overlaysRef.current,
           pageWidth,
           pageHeight,
           renderScale,
+          measureAtSize.current,
           measure.current,
         )
         layoutRef.current = size
-        setWrapAtMargin(!overlay.extracted || overlayAtPageMargin({ ...overlay, ...size }))
         onPreview(size)
-      }}
-      style={{
-        whiteSpace: wrapAtMargin ? 'pre-wrap' : 'nowrap',
-        overflowWrap: wrapAtMargin ? 'anywhere' : 'normal',
       }}
       onKeyDown={(event) => {
         event.stopPropagation()
@@ -845,6 +912,7 @@ function TextEditor({
 
 function OverlayItem({
   overlay,
+  siblings,
   visible,
   selected,
   hovered,
@@ -871,11 +939,12 @@ function OverlayItem({
   searchActive = false,
 }: {
   overlay: PageOverlay
+  siblings: readonly PageOverlay[]
   visible: PageOverlay
   selected: boolean
   hovered: boolean
   editing: boolean
-  editPreview: { width: number; height: number } | null
+  editPreview: FittedSize | null
   editAppearance: SampledAppearance | null
   interactive: boolean
   tool: AnnotationTool
@@ -889,8 +958,8 @@ function OverlayItem({
   onBeginResize: (event: React.PointerEvent, overlay: PageOverlay, handle: BoxHandle) => void
   onBeginEndpoint: (event: React.PointerEvent, overlay: PageOverlay, handle: LineHandle) => void
   onBeginTextEdit: (overlay: PageOverlay, caret: number | null) => void
-  onEditPreview: (preview: { width: number; height: number }) => void
-  onEditSave: (value: string, size: { width: number; height: number }) => void
+  onEditPreview: (preview: FittedSize) => void
+  onEditSave: (value: string, size: FittedSize) => void
   onEditCancel: () => void
   onErase?: (overlayId: string) => void
   searchMatch?: boolean
@@ -898,31 +967,25 @@ function OverlayItem({
 }) {
   const sized =
     editing && editPreview
-      ? { ...visible, width: editPreview.width, height: editPreview.height }
+      ? {
+          ...visible,
+          width: editPreview.width,
+          height: editPreview.height,
+          fontSize: editPreview.fontSize ?? visible.fontSize,
+        }
       : visible
-  const appearsSelected = selected && !(tool === 'redaction' && overlay.type !== 'redaction')
-  const emphasis: ShapeEmphasis =
-    tool === 'redaction' && overlay.type !== 'redaction'
-      ? 'none'
-      : appearsSelected
-        ? 'selected'
-        : hovered && tool !== 'redaction'
-          ? 'hover'
-          : 'none'
+  const appearsSelected = selected
+  const emphasis: ShapeEmphasis = appearsSelected ? 'selected' : hovered ? 'hover' : 'none'
   const showHandles =
     appearsSelected &&
     interactive &&
     !editing &&
     tool !== 'eraser' &&
-    (tool === 'redaction'
-      ? false
-      : overlay.type === 'redaction'
-        ? tool === 'select'
-        : true)
+    (overlay.type === 'redaction' ? tool === 'select' : true)
   return (
     <div
       data-overlay-id={overlay.id}
-      className={`annotation annotation-${overlay.type} ${appearsSelected ? 'is-selected' : ''} ${hovered && tool !== 'redaction' ? 'is-hovered' : ''} ${searchMatch ? 'is-search-match' : ''} ${searchActive ? 'is-search-active' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
+      className={`annotation annotation-${overlay.type} ${appearsSelected ? 'is-selected' : ''} ${hovered ? 'is-hovered' : ''} ${searchMatch ? 'is-search-match' : ''} ${searchActive ? 'is-search-active' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${overlay.overflow ? 'is-overflowing' : ''} ${editing ? 'is-editing' : ''}`}
       style={overlayStyle(sized, renderScale, editing, editing ? editAppearance : null)}
       role={interactive && !editing ? 'button' : undefined}
       tabIndex={interactive && !editing ? 0 : undefined}
@@ -965,6 +1028,7 @@ function OverlayItem({
       {editing ? (
         <TextEditor
           overlay={overlay}
+          overlays={siblings}
           renderScale={renderScale}
           pageWidth={pageWidth}
           pageHeight={pageHeight}
@@ -1121,6 +1185,37 @@ export function AnnotationLayer({
     window.addEventListener('pointerdown', closeIfOutside, true)
     return () => window.removeEventListener('pointerdown', closeIfOutside, true)
   }, [editingId])
+  // Any path can change an analysed line's text: the on-page editor, the sidebar
+  // list, paste, undo. Refitting here keeps one rule -- the box always fits its
+  // text -- instead of one per entry point.
+  const refittedText = useRef(new Map<string, string>())
+  useEffect(() => {
+    if (!interactive || !onChange || width <= 0 || height <= 0) return
+    const scale = Math.max(renderScale, 0.0001)
+    for (const overlay of overlays) {
+      if (!overlay.extracted || !overlay.edited || overlay.id === editingId) continue
+      const text = overlay.text ?? ''
+      if (refittedText.current.get(overlay.id) === text) continue
+      refittedText.current.set(overlay.id, text)
+      const fit = fitExtractedText({
+        overlay,
+        text,
+        bounds: extractedFitBounds(overlay, overlays),
+        pageWidth: width / scale,
+        pageHeight: height / scale,
+        measure: createCanvasSizeMeasurer(overlay),
+      })
+      const changes: Partial<PageOverlay> = {}
+      if (Math.abs(fit.width - overlay.width) > 0.0005) changes.width = fit.width
+      if (Math.abs(fit.height - overlay.height) > 0.0005) changes.height = fit.height
+      if (Math.abs(fit.fontSize - (overlay.fontSize ?? 18)) > 0.01) {
+        changes.fontSize = fit.fontSize
+      }
+      if (Boolean(fit.overflow) !== Boolean(overlay.overflow)) changes.overflow = fit.overflow
+      if (Object.keys(changes).length) onChange(overlay.id, changes)
+    }
+  }, [editingId, height, interactive, onChange, overlays, renderScale, width])
+
   const layerSize = () => {
     const bounds = layerRef.current?.getBoundingClientRect()
     return {
@@ -1142,16 +1237,8 @@ export function AnnotationLayer({
     return size.height > 0 ? size.width / size.height : 1
   }
 
-  const overlayFromSession = (session: CreateSession, end: PagePoint, shift: boolean) => {
-    if (tool === 'redaction' || session.tool === 'redaction') {
-      return createDrawnOverlay('redaction', session.start, end, '#000000', {
-        shift,
-        pageAspect: pageAspect(),
-        id: session.id,
-        strokeWidth: 0,
-      })
-    }
-    return createDrawnOverlay(session.tool, session.start, end, color, {
+  const overlayFromSession = (session: CreateSession, end: PagePoint, shift: boolean) =>
+    createDrawnOverlay(session.tool, session.start, end, color, {
       shift,
       pageAspect: pageAspect(),
       id: session.id,
@@ -1159,7 +1246,6 @@ export function AnnotationLayer({
       strokeWidth,
       fill: fill && isClosedDrawShape(session.tool),
     })
-  }
 
   const updateCreateDraft = (end: PagePoint, shift: boolean) => {
     const session = createRef.current
@@ -1261,7 +1347,6 @@ export function AnnotationLayer({
     if (
       !interactive ||
       tool === 'eraser' ||
-      tool === 'redaction' ||
       gestureRef.current ||
       createRef.current ||
       inkRef.current ||
@@ -1355,21 +1440,14 @@ export function AnnotationLayer({
       (end.x - session.start.x) * size.width,
       (end.y - session.start.y) * size.height,
     )
-    const creatingRedaction = tool === 'redaction' || session.tool === 'redaction'
     const overlay =
       distance < CLICK_DRAG_THRESHOLD_PX
-        ? createDefaultOverlay(
-            creatingRedaction ? 'redaction' : session.tool,
-            session.start.x,
-            session.start.y,
-            creatingRedaction ? '#000000' : color,
-            {
-              id: session.id,
-              sketchSeed: session.sketchSeed,
-              strokeWidth: creatingRedaction ? 0 : strokeWidth,
-              fill: creatingRedaction ? false : fill && isClosedDrawShape(session.tool),
-            },
-          )
+        ? createDefaultOverlay(session.tool, session.start.x, session.start.y, color, {
+            id: session.id,
+            sketchSeed: session.sketchSeed,
+            strokeWidth,
+            fill: fill && isClosedDrawShape(session.tool),
+          })
         : overlayFromSession(session, end, event.shiftKey)
     const placed =
       overlay.type === 'text'
@@ -1587,7 +1665,7 @@ export function AnnotationLayer({
           return
         }
         if (!DRAW_TOOLS.has(tool)) return
-        if (!onLayer && tool !== 'redaction') return
+        if (!onLayer) return
         createRef.current = {
           pointerId: event.pointerId,
           tool: tool as CreateSession['tool'],
@@ -1644,6 +1722,7 @@ export function AnnotationLayer({
           <OverlayItem
             key={overlay.id}
             overlay={overlay}
+            siblings={overlays}
             visible={visible}
             selected={selected}
             hovered={hovered}
@@ -1672,12 +1751,14 @@ export function AnnotationLayer({
             }}
             onEditSave={(value) => {
               const next = commitText(overlay, value)
-              const fitted = fitOverlayToText(
+              const fitted = fitOverlayBox(
                 overlay,
                 next,
+                overlays,
                 width,
                 height,
                 renderScale,
+                createCanvasSizeMeasurer(overlay),
                 createCanvasMeasurer(overlayFontCss(overlay, renderScale)),
               )
               const changes: Partial<PageOverlay> = {}
@@ -1689,9 +1770,28 @@ export function AnnotationLayer({
                 changes.width = fitted.width
                 changes.height = fitted.height
               }
-              if (overlay.extracted && next !== (overlay.text ?? '') && editAppearance) {
-                changes.color = editAppearance.color
-                changes.backgroundColor = editAppearance.backgroundColor
+              if (overlay.extracted) {
+                // Remember the analysed geometry so deleting text can shrink back.
+                if (!overlay.source && !overlay.edited) {
+                  changes.source = {
+                    width: overlay.width,
+                    height: overlay.height,
+                    fontSize: overlay.fontSize ?? 18,
+                  }
+                }
+                if (
+                  fitted.fontSize != null &&
+                  Math.abs(fitted.fontSize - (overlay.fontSize ?? 18)) > 0.01
+                ) {
+                  changes.fontSize = fitted.fontSize
+                }
+                if (Boolean(fitted.overflow) !== Boolean(overlay.overflow)) {
+                  changes.overflow = fitted.overflow
+                }
+                if (next !== (overlay.text ?? '') && editAppearance) {
+                  changes.color = editAppearance.color
+                  changes.backgroundColor = editAppearance.backgroundColor
+                }
               }
               if (Object.keys(changes).length) onChange?.(overlay.id, changes)
             }}
@@ -1699,21 +1799,7 @@ export function AnnotationLayer({
           />
         )
       })}
-      {createDraft && (tool === 'redaction' || createDraft.type === 'redaction') && (
-        <div
-          className="annotation annotation-redaction is-draft"
-          style={{
-            left: `${createDraft.x * 100}%`,
-            top: `${createDraft.y * 100}%`,
-            width: `${createDraft.width * 100}%`,
-            height: `${createDraft.height * 100}%`,
-            boxSizing: 'border-box',
-          }}
-        >
-          <span className="annotation-redaction-fill" aria-hidden="true" />
-        </div>
-      )}
-      {createDraft && tool !== 'redaction' && createDraft.type !== 'redaction' && (
+      {createDraft && (
         <div className={`annotation annotation-${createDraft.type} is-draft`} style={overlayStyle(createDraft, renderScale)}>
           <OverlayContent
             overlay={createDraft}

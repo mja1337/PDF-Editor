@@ -10,26 +10,23 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
+  Crosshair,
   ClipboardPaste,
   Copy,
   Diamond,
   Download,
-  Eraser,
+  Droplets,
   EyeOff,
   FilePlus2,
   FileText,
   Files,
   FolderOpen,
-  Grab,
   LoaderCircle,
   ImageDown,
   Highlighter,
   Maximize2,
   Minus,
   MoveHorizontal,
-  MousePointer2,
-  PenLine,
-  Pencil,
   Plus,
   Redo2,
   RotateCcw,
@@ -41,14 +38,12 @@ import {
   SendToBack,
   Slash,
   Square,
-  Strikethrough,
   Trash2,
+  TriangleAlert,
   Type,
   Undo2,
-  Underline,
   X,
 } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -58,6 +53,14 @@ import {
   useRef,
   useState,
 } from 'react'
+import { ANNOTATE_COLOURS, ANNOTATE_PALETTE, STROKE_WEIGHTS, annotationHint, annotationUsesColour, annotationUsesFill, annotationUsesWeight } from './app/annotationTools'
+import { analysingLabel, formatBytes, scannedPageHint, userFacingError } from './app/messages'
+import { destroySession, destroySessions } from './app/sessions'
+import { useDocumentOutline } from './app/useDocumentOutline'
+import { useDocumentSearch } from './app/useDocumentSearch'
+import { DEFAULT_WATERMARK, watermarkFieldsForDocument, type WatermarkDraft } from './app/watermark'
+import { IconButton } from './components/IconButton'
+import { OverlayTextField } from './components/OverlayTextField'
 import { LazyThumbnail } from './components/LazyThumbnail'
 import { OcrConsentDialog } from './components/OcrConsentDialog'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -92,7 +95,6 @@ import {
   saveStamp,
 } from './domain/appStorage'
 import type { OcrConsent, SavedSignature } from './domain/preferences'
-import { platformOcrAvailable } from './pdf/ocr'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
 import {
@@ -101,7 +103,6 @@ import {
   exportRedactedPdf,
   redactionCount,
 } from './pdf/redact'
-import type { OutlineEntry, SearchResult } from './pdf/navigation'
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -111,20 +112,7 @@ import {
   type PageViewMode,
 } from './pdf/pageView'
 
-function userFacingError(error: unknown, fallback: string) {
-  if (
-    error instanceof TypeError &&
-    /Failed to fetch dynamically imported module/i.test(error.message)
-  ) {
-    if (import.meta.env.DEV) {
-      return 'The editor lost its connection to the local app. Refresh the page. If that does not help, restart npm run dev.'
-    }
-    return 'The editor could not load a required module. Hard-refresh the page (Ctrl+Shift+R or Cmd+Shift+R) to clear stale cache, then try again.'
-  }
-  return error instanceof Error ? error.message : fallback
-}
-
-type NavigatorMode = 'pages' | 'outline' | 'search'
+type NavigatorMode = 'pages' | 'outline' | 'search' | 'text'
 type ContextTarget =
   | { kind: 'pages'; x: number; y: number; pageId: string }
   | {
@@ -135,210 +123,6 @@ type ContextTarget =
       point: { x: number; y: number }
     }
   | { kind: 'overlay'; x: number; y: number; pageId: string; overlayId: string }
-
-function formatBytes(value: number) {
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`
-}
-
-const ANNOTATE_PALETTE: Array<
-  | { id: AnnotationTool; label: string; icon: LucideIcon }
-  | { id: 'signature'; label: string; icon: LucideIcon }
-> = [
-  { id: 'select', label: 'Select', icon: MousePointer2 },
-  { id: 'ink', label: 'Draw', icon: Pencil },
-  { id: 'eraser', label: 'Erase', icon: Eraser },
-  { id: 'signature', label: 'Signature', icon: PenLine },
-  { id: 'text', label: 'Text', icon: Type },
-  { id: 'highlight', label: 'Highlight', icon: Highlighter },
-  { id: 'underline', label: 'Underline', icon: Underline },
-  { id: 'strikeout', label: 'Strike', icon: Strikethrough },
-  { id: 'rectangle', label: 'Box', icon: Square },
-  { id: 'ellipse', label: 'Ellipse', icon: Circle },
-  { id: 'line', label: 'Line', icon: Slash },
-  { id: 'arrow', label: 'Arrow', icon: ArrowUpRight },
-  { id: 'diamond', label: 'Diamond', icon: Diamond },
-  { id: 'redaction', label: 'Redact', icon: EyeOff },
-]
-
-const ANNOTATE_COLOURS = [
-  '#111111',
-  '#ffffff',
-  '#e05252',
-  '#f4d35e',
-  '#f97316',
-  '#22c55e',
-  '#147d72',
-  '#3b82f6',
-  '#a855f7',
-]
-
-const STROKE_WEIGHTS = [1, 2, 4, 8] as const
-
-function annotationUsesColour(tool: AnnotationTool) {
-  return (
-    tool === 'ink' ||
-    tool === 'highlight' ||
-    tool === 'underline' ||
-    tool === 'strikeout' ||
-    tool === 'rectangle' ||
-    tool === 'ellipse' ||
-    tool === 'line' ||
-    tool === 'arrow' ||
-    tool === 'diamond'
-  )
-}
-
-function annotationUsesWeight(tool: AnnotationTool) {
-  return (
-    tool === 'ink' ||
-    tool === 'underline' ||
-    tool === 'strikeout' ||
-    tool === 'rectangle' ||
-    tool === 'ellipse' ||
-    tool === 'line' ||
-    tool === 'arrow' ||
-    tool === 'diamond'
-  )
-}
-
-function annotationUsesFill(tool: AnnotationTool) {
-  return tool === 'rectangle' || tool === 'ellipse' || tool === 'diamond'
-}
-
-function annotationHint(tool: AnnotationTool, hasExtracted: boolean) {
-  if (tool === 'select') return 'Drag a mark to move it. Handles resize. Click empty space to clear the selection.'
-  if (tool === 'ink') return 'Draw freely like a pen. Click a stroke to move it. Escape returns to Select.'
-  if (tool === 'eraser') return 'Drag over strokes, shapes, or notes. Escape returns to Select.'
-  if (tool === 'highlight' || tool === 'underline' || tool === 'strikeout') {
-    return hasExtracted
-      ? 'Click a mark to move it, or an analysed line to mark. Drag empty space to draw. Escape returns to Select.'
-      : 'Drag empty space to size a mark. Click an existing mark to move it.'
-  }
-  if (tool === 'text') return 'Click or drag empty space to place text, then type. Click a mark to move it.'
-  if (tool === 'line' || tool === 'arrow') {
-    return 'Drag empty space from A to B. Click a mark to move it. Shift snaps 45°. Escape returns to Select.'
-  }
-  if (tool === 'rectangle' || tool === 'ellipse' || tool === 'diamond') {
-    return 'Drag empty space to size. Click a mark to move it. Shift constrains. Escape returns to Select.'
-  }
-  if (tool === 'redaction') {
-    return 'Drag over text or areas to mark for removal. Use Export redacted PDF to permanently remove hidden content from affected pages.'
-  }
-  return 'Click the page to place the annotation.'
-}
-
-function analysingLabel(progress: string) {
-  return progress.includes(' / ') ? `Analysing ${progress}` : progress || 'Analysing…'
-}
-
-const DEFAULT_WATERMARK = { opacity: 0.2, rotation: 45 } as const
-
-type WatermarkDraft = WatermarkConfig & { documentId: string }
-
-function watermarkFieldsForDocument(
-  documentId: string | undefined,
-  applied: WatermarkConfig | null | undefined,
-  draft: WatermarkDraft | null,
-) {
-  if (draft && documentId && draft.documentId === documentId) {
-    return {
-      text: draft.text,
-      opacity: draft.opacity,
-      rotation: draft.rotation,
-    }
-  }
-  if (applied) {
-    return {
-      text: applied.text,
-      opacity: applied.opacity,
-      rotation: applied.rotation,
-    }
-  }
-  return {
-    text: '',
-    opacity: DEFAULT_WATERMARK.opacity,
-    rotation: DEFAULT_WATERMARK.rotation,
-  }
-}
-
-function scannedPageHint(ocrConsent: 'unset' | 'accepted' | 'declined') {
-  if (ocrConsent === 'accepted') {
-    return platformOcrAvailable()
-      ? 'No text was found with PDF data, this browser’s detector, or Tesseract OCR. The page is likely a photo or a language other than English.'
-      : 'No text was found with PDF data or Tesseract OCR. The page is likely a photo or a language other than English.'
-  }
-  if (platformOcrAvailable()) {
-    return 'No text was found, including with this browser’s on-device detector. You can download a local Tesseract engine from this GitHub Pages site in Settings to retry scans.'
-  }
-  return 'No extractable PDF text was found. You can download a local Tesseract engine from this GitHub Pages site in Settings to read scanned pages.'
-}
-
-function OverlayTextField({
-  overlay,
-  onCommit,
-}: {
-  overlay: PageOverlay
-  onCommit: (text: string) => void
-}) {
-  const [draft, setDraft] = useState(overlay.text ?? '')
-  const [source, setSource] = useState({ id: overlay.id, text: overlay.text ?? '' })
-  if (overlay.id !== source.id || overlay.text !== source.text) {
-    setSource({ id: overlay.id, text: overlay.text ?? '' })
-    setDraft(overlay.text ?? '')
-  }
-
-  return (
-    <textarea
-      aria-label="Text"
-      value={draft}
-      maxLength={4000}
-      rows={overlay.extracted ? 4 : 2}
-      onChange={(event) => setDraft(event.currentTarget.value)}
-      onBlur={() => {
-        const next = overlay.extracted ? draft : draft.trim() || 'Add text'
-        if (next !== (overlay.text ?? '')) onCommit(next)
-      }}
-    />
-  )
-}
-
-async function destroySession(session: PdfSession | null) {
-  if (!session) return
-  await session.viewer.loadingTask.destroy()
-}
-
-async function destroySessions(sessions: ReadonlyMap<string, PdfSession>) {
-  await Promise.allSettled([...sessions.values()].map(destroySession))
-}
-
-function IconButton({
-  label,
-  disabled,
-  onClick,
-  children,
-  className = '',
-}: {
-  label: string
-  disabled?: boolean
-  onClick: () => void
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <button
-      type="button"
-      className={`icon-button ${className}`}
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  )
-}
 
 export function App() {
   const [history, dispatch] = useReducer(documentReducer, initialHistory)
@@ -368,18 +152,6 @@ export function App() {
   const [viewMode, setViewMode] = useState<PageViewMode>('width')
   const [previewWidth, setPreviewWidth] = useState(0)
   const [navigatorMode, setNavigatorMode] = useState<NavigatorMode>('pages')
-  const [outlineEntries, setOutlineEntries] = useState<OutlineEntry[]>([])
-  const [hasOutline, setHasOutline] = useState(false)
-  const [outlineStatus, setOutlineStatus] = useState<'idle' | 'loading' | 'ready'>(
-    'idle',
-  )
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
-  const [searchStatus, setSearchStatus] = useState<
-    'idle' | 'searching' | 'ready'
-  >('idle')
-  const [activeSearchIndex, setActiveSearchIndex] = useState(0)
-  const [searchProgress, setSearchProgress] = useState('')
   const [analyseProgress, setAnalyseProgress] = useState('')
   const [analyseSummary, setAnalyseSummary] = useState<{
     blocks: number
@@ -402,6 +174,7 @@ export function App() {
   const savedStampRef = useRef(savedStamp)
   const ocrConsentRef = useRef(ocrConsent)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [watermarkOpen, setWatermarkOpen] = useState(false)
   const [ocrPromptOpen, setOcrPromptOpen] = useState(false)
   const [passwordPrompt, setPasswordPrompt] = useState<{
     fileName: string
@@ -412,13 +185,10 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const addPdfInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
-  const stageRef = useRef<HTMLElement>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const searchResultRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const stageRef = useRef<HTMLDivElement>(null)
   const sessionsRef = useRef<Map<string, PdfSession>>(new Map())
   const loadSequence = useRef(0)
   const selectionAnchorRef = useRef<string | null>(null)
-  const searchAbortRef = useRef<AbortController | null>(null)
   const analyseAbortRef = useRef<AbortController | null>(null)
   const passwordPromptRef = useRef<((password: string | null) => void) | null>(null)
   const editorDocument = history.present
@@ -488,23 +258,92 @@ export function App() {
   const selectedSession = selectedPage
     ? sessions.get(selectedPage.sourceDocumentId) ?? null
     : null
-  const searchHighlightOverlayIds = useMemo(() => {
-    if (searchStatus !== 'ready' || searchResults.length === 0 || !selectedPage) {
-      return undefined
-    }
-    const ids = searchResults
-      .filter((result) => result.pageId === selectedPage.id && result.overlayId)
-      .map((result) => result.overlayId!)
-    return ids.length > 0 ? new Set(ids) : undefined
-  }, [searchResults, searchStatus, selectedPage])
-  const activeSearchOverlayId = useMemo(() => {
-    if (searchStatus !== 'ready' || searchResults.length === 0 || !selectedPage) {
-      return null
-    }
-    const active = searchResults[activeSearchIndex]
-    if (!active || active.pageId !== selectedPage.id) return null
-    return active.overlayId ?? null
-  }, [activeSearchIndex, searchResults, searchStatus, selectedPage])
+  const focusPage = useCallback(
+    (
+      pageId: string,
+      options: { extend?: boolean; toggle?: boolean } = {},
+    ) => {
+      if (!editorDocument) return
+      const pageIndex = editorDocument.pages.findIndex((page) => page.id === pageId)
+      if (pageIndex < 0) return
+
+      setSelectedPageId(pageId)
+      setSelectedOverlayId(null)
+      setSelectedPageIds((current) => {
+        if (options.extend) {
+          const anchorId = selectionAnchorRef.current ?? selectedPageId ?? pageId
+          const anchorIndex = editorDocument.pages.findIndex(
+            (page) => page.id === anchorId,
+          )
+          const start = Math.min(anchorIndex < 0 ? pageIndex : anchorIndex, pageIndex)
+          const end = Math.max(anchorIndex < 0 ? pageIndex : anchorIndex, pageIndex)
+          return new Set(
+            editorDocument.pages.slice(start, end + 1).map((page) => page.id),
+          )
+        }
+
+        selectionAnchorRef.current = pageId
+        if (options.toggle) {
+          const next = new Set(current)
+          if (next.has(pageId) && next.size > 1) next.delete(pageId)
+          else next.add(pageId)
+          return next
+        }
+        return new Set([pageId])
+      })
+
+      window.requestAnimationFrame(() => {
+        document.getElementById(`thumbnail-${pageId}`)?.scrollIntoView({
+          block: 'nearest',
+          inline: 'nearest',
+        })
+      })
+    },
+    [editorDocument, selectedPageId],
+  )
+
+  const outlineUnavailable = useCallback(
+    () => setNavigatorMode((mode) => (mode === 'outline' ? 'pages' : mode)),
+    [],
+  )
+  const {
+    entries: outlineEntries,
+    available: hasOutline,
+    status: outlineStatus,
+    load: loadOutline,
+    invalidate: invalidateOutline,
+    reset: resetOutline,
+  } = useDocumentOutline({
+    editorDocument,
+    sessions,
+    sessionsRef,
+    onUnavailable: outlineUnavailable,
+  })
+  const {
+    query: searchQuery,
+    setQuery: setSearchQuery,
+    results: searchResults,
+    status: searchStatus,
+    progress: searchProgress,
+    activeIndex: activeSearchIndex,
+    inputRef: searchInputRef,
+    resultRefs: searchResultRefs,
+    run: runSearch,
+    focusResult: focusSearchResult,
+    step: stepSearchMatch,
+    abort: abortSearch,
+    clearResults: clearSearchResults,
+    reset: resetSearch,
+    highlightOverlayIds: searchHighlightOverlayIds,
+    activeOverlayId: activeSearchOverlayId,
+  } = useDocumentSearch({
+    editorDocument,
+    selectedPage: selectedPage ?? null,
+    sessionsRef,
+    focusPage,
+    onSelectOverlay: setSelectedOverlayId,
+    onError: setError,
+  })
   const selectedOverlay =
     selectedPage?.overlays.find((overlay) => overlay.id === selectedOverlayId) ??
     null
@@ -520,6 +359,18 @@ export function App() {
     [editorDocument],
   )
   const hasRedactions = totalRedactions > 0
+  const toolHasOptions =
+    annotationUsesColour(annotationTool) ||
+    annotationUsesWeight(annotationTool) ||
+    annotationUsesFill(annotationTool)
+  // Excalidraw-style: the panel only exists when it has something to say.
+  const showInspector = Boolean(
+    toolHasOptions ||
+      selectedOverlay ||
+      pendingSignature ||
+      annotationTool !== 'select' ||
+      totalRedactions > 0,
+  )
 
   const handlePreviewSize = useCallback((size: { width: number }) => {
     setPreviewWidth(size.width)
@@ -588,29 +439,12 @@ export function App() {
 
   useEffect(
     () => () => {
-      searchAbortRef.current?.abort()
+      abortSearch()
       analyseAbortRef.current?.abort()
       void destroySessions(sessionsRef.current)
     },
-    [],
+    [abortSearch],
   )
-
-  useEffect(() => {
-    if (!editorDocument || sessions.size === 0) return
-    let cancelled = false
-    void import('./pdf/navigation').then(({ documentHasOutline }) =>
-      documentHasOutline(sessionsRef.current, editorDocument).then((value) => {
-        if (cancelled) return
-        setHasOutline(value)
-        if (!value) {
-          setNavigatorMode((mode) => (mode === 'outline' ? 'pages' : mode))
-        }
-      }),
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [editorDocument, sessions])
 
   const promptPdfPassword = useCallback((fileName: string, incorrect: boolean) => {
     return new Promise<string | null>((resolve) => {
@@ -627,7 +461,7 @@ export function App() {
 
   const loadPdfFiles = useCallback(async (files: File[], replace: boolean) => {
     if (files.length === 0) return
-    searchAbortRef.current?.abort()
+    abortSearch()
     analyseAbortRef.current?.abort()
     const sequence = ++loadSequence.current
     setBusy(replace ? 'opening' : 'adding')
@@ -678,12 +512,8 @@ export function App() {
         setZoom(1)
         setViewMode('width')
         setNavigatorMode('pages')
-        setOutlineEntries([])
-        setHasOutline(false)
-        setOutlineStatus('idle')
-        setSearchQuery('')
-        setSearchResults([])
-        setActiveSearchIndex(0)
+        resetOutline()
+        resetSearch()
         setWatermarkDraft(null)
         setAnnotationTool('select')
         setSelectedOverlayId(null)
@@ -697,10 +527,8 @@ export function App() {
         setSelectedPageId(firstPageId)
         setSelectedPageIds(new Set(pages.map((page) => page.id)))
         selectionAnchorRef.current = firstPageId
-        setOutlineStatus('idle')
-        setOutlineEntries([])
-        setSearchResults([])
-        setActiveSearchIndex(0)
+        invalidateOutline()
+        clearSearchResults()
         setSelectedOverlayId(null)
       }
 
@@ -721,11 +549,20 @@ export function App() {
       if (fileInputRef.current) fileInputRef.current.value = ''
       if (addPdfInputRef.current) addPdfInputRef.current.value = ''
     }
-  }, [finishPasswordPrompt, promptPdfPassword, selectedPageId])
+  }, [
+    abortSearch,
+    clearSearchResults,
+    finishPasswordPrompt,
+    invalidateOutline,
+    promptPdfPassword,
+    resetOutline,
+    resetSearch,
+    selectedPageId,
+  ])
 
   const loadImageFiles = useCallback(async (files: File[], replace: boolean) => {
     if (files.length === 0) return
-    searchAbortRef.current?.abort()
+    abortSearch()
     analyseAbortRef.current?.abort()
     const sequence = ++loadSequence.current
     setBusy(replace ? 'opening' : 'adding')
@@ -772,12 +609,8 @@ export function App() {
         setZoom(1)
         setViewMode('width')
         setNavigatorMode('pages')
-        setOutlineEntries([])
-        setHasOutline(false)
-        setOutlineStatus('idle')
-        setSearchQuery('')
-        setSearchResults([])
-        setActiveSearchIndex(0)
+        resetOutline()
+        resetSearch()
         setWatermarkDraft(null)
         setAnnotationTool('select')
         setSelectedOverlayId(null)
@@ -791,10 +624,8 @@ export function App() {
         setSelectedPageId(firstPageId)
         setSelectedPageIds(new Set(pages.map((page) => page.id)))
         selectionAnchorRef.current = firstPageId
-        setOutlineStatus('idle')
-        setOutlineEntries([])
-        setSearchResults([])
-        setActiveSearchIndex(0)
+        invalidateOutline()
+        clearSearchResults()
         setSelectedOverlayId(null)
       }
 
@@ -809,7 +640,14 @@ export function App() {
       if (sequence === loadSequence.current) setBusy(null)
       if (imageInputRef.current) imageInputRef.current.value = ''
     }
-  }, [selectedPageId])
+  }, [
+    abortSearch,
+    clearSearchResults,
+    invalidateOutline,
+    resetOutline,
+    resetSearch,
+    selectedPageId,
+  ])
 
   const sourceBytes = useCallback(
     () =>
@@ -884,6 +722,15 @@ export function App() {
     }
   }, [busy, editorDocument, sessions, sourceBytes, sourcePasswords])
 
+  const exportDocument = useCallback(async () => {
+    if (!editorDocument || sessions.size === 0 || busy) return
+    if (documentHasRedactions(editorDocument)) {
+      await saveRedactedDocument()
+    } else {
+      await saveDocument()
+    }
+  }, [busy, editorDocument, saveDocument, saveRedactedDocument, sessions.size])
+
   const extractSelected = useCallback(async () => {
     if (selectedPages.length === 0 || !editorDocument || busy) return
     setBusy('extracting')
@@ -953,7 +800,7 @@ export function App() {
 
   const closeDocument = useCallback(async () => {
     ++loadSequence.current
-    searchAbortRef.current?.abort()
+    abortSearch()
     analyseAbortRef.current?.abort()
     await destroySessions(sessionsRef.current)
     sessionsRef.current = new Map()
@@ -966,12 +813,8 @@ export function App() {
     setZoom(1)
     setViewMode('width')
     setNavigatorMode('pages')
-    setOutlineEntries([])
-    setHasOutline(false)
-    setOutlineStatus('idle')
-    setSearchQuery('')
-    setSearchResults([])
-    setActiveSearchIndex(0)
+    resetOutline()
+    resetSearch()
     setWatermarkDraft(null)
     setAnnotationTool('select')
     setSelectedOverlayId(null)
@@ -980,74 +823,7 @@ export function App() {
     setAnalyseSummary(null)
     setAnalyseProgress('')
     setOcrPromptOpen(false)
-  }, [])
-
-  const focusPage = useCallback(
-    (
-      pageId: string,
-      options: { extend?: boolean; toggle?: boolean } = {},
-    ) => {
-      if (!editorDocument) return
-      const pageIndex = editorDocument.pages.findIndex((page) => page.id === pageId)
-      if (pageIndex < 0) return
-
-      setSelectedPageId(pageId)
-      setSelectedOverlayId(null)
-      setSelectedPageIds((current) => {
-        if (options.extend) {
-          const anchorId = selectionAnchorRef.current ?? selectedPageId ?? pageId
-          const anchorIndex = editorDocument.pages.findIndex(
-            (page) => page.id === anchorId,
-          )
-          const start = Math.min(anchorIndex < 0 ? pageIndex : anchorIndex, pageIndex)
-          const end = Math.max(anchorIndex < 0 ? pageIndex : anchorIndex, pageIndex)
-          return new Set(
-            editorDocument.pages.slice(start, end + 1).map((page) => page.id),
-          )
-        }
-
-        selectionAnchorRef.current = pageId
-        if (options.toggle) {
-          const next = new Set(current)
-          if (next.has(pageId) && next.size > 1) next.delete(pageId)
-          else next.add(pageId)
-          return next
-        }
-        return new Set([pageId])
-      })
-
-      window.requestAnimationFrame(() => {
-        document.getElementById(`thumbnail-${pageId}`)?.scrollIntoView({
-          block: 'nearest',
-          inline: 'nearest',
-        })
-      })
-    },
-    [editorDocument, selectedPageId],
-  )
-
-  const focusSearchResult = useCallback(
-    (index: number, results: SearchResult[] = searchResults) => {
-      const result = results[index]
-      if (!result) return
-      setActiveSearchIndex(index)
-      focusPage(result.pageId)
-      if (result.overlayId) {
-        window.requestAnimationFrame(() => setSelectedOverlayId(result.overlayId!))
-      }
-    },
-    [focusPage, searchResults],
-  )
-
-  const stepSearchMatch = useCallback(
-    (direction: 1 | -1) => {
-      if (searchResults.length === 0) return
-      const next =
-        (activeSearchIndex + direction + searchResults.length) % searchResults.length
-      focusSearchResult(next)
-    },
-    [activeSearchIndex, focusSearchResult, searchResults],
-  )
+  }, [abortSearch, resetOutline, resetSearch])
 
   const jumpToPosition = useCallback(
     (position: number, extend = false) => {
@@ -1499,41 +1275,6 @@ export function App() {
     ]
   })()
 
-  const runSearch = useCallback(async (documentOverride?: typeof editorDocument) => {
-    const searchableDocument = documentOverride ?? editorDocument
-    if (!searchableDocument || !searchQuery.trim()) return
-    searchAbortRef.current?.abort()
-    const controller = new AbortController()
-    searchAbortRef.current = controller
-    setSearchStatus('searching')
-    setSearchProgress(`0 / ${searchableDocument.pages.length}`)
-    setSearchResults([])
-    setActiveSearchIndex(0)
-    try {
-      const { searchEditorDocument } = await import('./pdf/navigation')
-      const results = await searchEditorDocument(
-        sessionsRef.current,
-        searchableDocument,
-        searchQuery,
-        controller.signal,
-        (completed, total) => setSearchProgress(`${completed} / ${total}`),
-      )
-      if (!controller.signal.aborted) {
-        setSearchResults(results)
-        setSearchStatus('ready')
-        if (results.length > 0) {
-          setActiveSearchIndex(0)
-          focusSearchResult(0, results)
-        }
-      }
-    } catch (searchError) {
-      if (!(searchError instanceof DOMException) || searchError.name !== 'AbortError') {
-        setError(userFacingError(searchError, 'The document search could not be completed.'))
-        setSearchStatus('idle')
-      }
-    }
-  }, [editorDocument, focusSearchResult, searchQuery])
-
   const analyseDocument = useCallback(async () => {
     if (!editorDocument || busy) return
     analyseAbortRef.current?.abort()
@@ -1562,6 +1303,8 @@ export function App() {
         ocrPages: result.ocrPages,
       })
       setOcrPromptOpen(result.emptyPages > 0 && consent === 'unset')
+      // Show what was found instead of leaving the rail on thumbnails.
+      setNavigatorMode('text')
       setAnnotationTool('select')
       const first = result.overlays[0]
       if (first) {
@@ -1603,28 +1346,10 @@ export function App() {
     }
   }, [busy, editorDocument, runSearch, searchQuery])
 
-  const showOutline = useCallback(async () => {
+  const showOutline = useCallback(() => {
     setNavigatorMode('outline')
-    if (!editorDocument || outlineStatus !== 'idle') return
-    setOutlineStatus('loading')
-    try {
-      const { readEditorOutline } = await import('./pdf/navigation')
-      setOutlineEntries(
-        await readEditorOutline(sessionsRef.current, editorDocument),
-      )
-    } catch {
-      setOutlineEntries([])
-    } finally {
-      setOutlineStatus('ready')
-    }
-  }, [editorDocument, outlineStatus])
-
-  useEffect(() => {
-    if (searchResults.length === 0) return
-    const result = searchResults[activeSearchIndex]
-    if (!result) return
-    searchResultRefs.current.get(result.id)?.scrollIntoView({ block: 'nearest' })
-  }, [activeSearchIndex, searchResults])
+    void loadOutline()
+  }, [loadOutline])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1667,7 +1392,7 @@ export function App() {
         dispatch({ type: event.shiftKey ? 'redo' : 'undo' })
       } else if (command && key === 's' && editorDocument) {
         event.preventDefault()
-        void saveDocument()
+        void exportDocument()
       } else if (command && key === 'a' && editorDocument) {
         event.preventDefault()
         selectAllPages()
@@ -1700,13 +1425,14 @@ export function App() {
     jumpToPosition,
     overlayClipboard,
     pasteOverlay,
-    saveDocument,
+    exportDocument,
     selectAllPages,
     selectedIndex,
     selectedOverlay,
     selectedPage,
     signatureOpen,
     pendingSignature,
+    searchInputRef,
     searchResults,
     stepSearchMatch,
   ])
@@ -1753,104 +1479,169 @@ export function App() {
       />
 
       <header className="topbar">
-        <div className="brand-lockup" aria-label="pdfe">
-          <span className="brand-mark">
-            <FileText size={19} strokeWidth={2.4} />
+        <div className="island island-file">
+          <span className="brand-mark" aria-label="pdfe" title="pdfe">
+            <FileText size={17} strokeWidth={2.4} />
           </span>
-          <strong>pdfe</strong>
-        </div>
-
-        <div className="toolbar" aria-label="Document toolbar">
-          <button
-            type="button"
-            className="toolbar-button"
+          <IconButton
+            label={editorDocument ? 'Open another PDF' : 'Open PDF'}
             disabled={busy !== null}
             onClick={openFilePicker}
           >
             <FolderOpen size={17} />
-            <span>{editorDocument ? 'Open another' : 'Open PDF'}</span>
-          </button>
-          <span className="toolbar-divider" aria-hidden="true" />
-          <IconButton
-            label="Undo"
-            disabled={history.past.length === 0}
-            onClick={() => dispatch({ type: 'undo' })}
-          >
-            <Undo2 size={18} />
-          </IconButton>
-          <IconButton
-            label="Redo"
-            disabled={history.future.length === 0}
-            onClick={() => dispatch({ type: 'redo' })}
-          >
-            <Redo2 size={18} />
           </IconButton>
           {editorDocument && (
-            <>
-              <span className="toolbar-divider" aria-hidden="true" />
-              <button
-                type="button"
-                className="toolbar-button"
-                disabled={busy !== null}
-                onClick={() => addPdfInputRef.current?.click()}
-              >
-                <Files size={17} />
-                <span>Add PDFs</span>
-              </button>
-              <button
-                type="button"
-                className="toolbar-button"
-                disabled={busy !== null}
-                onClick={() => void analyseDocument()}
-              >
-                {busy === 'analysing' ? (
-                  <LoaderCircle className="spin" size={17} />
-                ) : (
-                  <ScanSearch size={17} />
-                )}
-                <span>{busy === 'analysing' ? 'Analysing…' : 'Analyse'}</span>
-              </button>
-            </>
+            <IconButton
+              label="Add PDFs"
+              disabled={busy !== null}
+              onClick={() => addPdfInputRef.current?.click()}
+            >
+              <Files size={17} />
+            </IconButton>
           )}
+          <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
+            <Settings size={17} />
+          </IconButton>
         </div>
 
-        <div className="topbar-actions">
-          <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
-            <Settings size={18} />
-          </IconButton>
+        {editorDocument && (
+          <div className="island island-doc">
+            <IconButton
+              label={busy === 'analysing' ? 'Analysing…' : 'Analyse text'}
+              disabled={busy !== null}
+              onClick={() => void analyseDocument()}
+            >
+              {busy === 'analysing' ? (
+                <LoaderCircle className="spin" size={17} />
+              ) : (
+                <ScanSearch size={17} />
+              )}
+            </IconButton>
+            <IconButton
+              label="Watermark all pages"
+              className={watermarkOpen ? 'is-active' : ''}
+              onClick={() => setWatermarkOpen((open) => !open)}
+            >
+              <Droplets size={17} />
+            </IconButton>
+            <button
+              type="button"
+              className={`export-button${hasRedactions ? ' export-button-redacted' : ''}`}
+              disabled={busy !== null}
+              title={
+                hasRedactions
+                  ? 'Secure export: rasterizes pages with redaction marks so hidden text cannot be copied or searched'
+                  : 'Download the edited PDF'
+              }
+              onClick={() => void exportDocument()}
+            >
+              {busy === 'exporting' || busy === 'redacting' ? (
+                <LoaderCircle className="spin" size={17} />
+              ) : hasRedactions ? (
+                <EyeOff size={17} />
+              ) : (
+                <Download size={17} />
+              )}
+              {hasRedactions ? 'Export redacted PDF' : 'Export PDF'}
+            </button>
+          </div>
+        )}
+      </header>
+
+      {editorDocument && watermarkOpen && (
+        <div className="popover watermark-popover" role="dialog" aria-label="Watermark all pages">
+          <section className="tool-section watermark-tools">
+            <h3>Watermark all pages</h3>
+            <label>
+              <span className="visually-hidden">Watermark text</span>
+              <input
+                type="text"
+                value={watermarkFields.text}
+                maxLength={80}
+                placeholder="Draft, confidential…"
+                onChange={(event) =>
+                  updateWatermarkDraft({ text: event.currentTarget.value })
+                }
+              />
+            </label>
+            <div className="property-row">
+              <span>Opacity</span>
+              <div className="property-options">
+                {[0.1, 0.15, 0.2, 0.3, 0.4].map((opacity) => (
+                  <button
+                    key={opacity}
+                    type="button"
+                    className={watermarkFields.opacity === opacity ? 'is-active' : ''}
+                    onClick={() => updateWatermarkDraft({ opacity })}
+                  >
+                    {Math.round(opacity * 100)}%
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="property-row">
+              <span>Angle</span>
+              <div className="property-options">
+                {[-45, -30, 0, 30, 45].map((rotation) => (
+                  <button
+                    key={rotation}
+                    type="button"
+                    className={watermarkFields.rotation === rotation ? 'is-active' : ''}
+                    onClick={() => updateWatermarkDraft({ rotation })}
+                  >
+                    {rotation}°
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="button-grid">
+              <button
+                type="button"
+                disabled={watermarkFields.text.trim().length === 0}
+                onClick={() => {
+                  dispatch({
+                    type: 'setWatermark',
+                    watermark: {
+                      text: watermarkFields.text.trim(),
+                      opacity: watermarkFields.opacity,
+                      rotation: watermarkFields.rotation,
+                    },
+                  })
+                  setWatermarkDraft(null)
+                }}
+              >
+                <Type size={17} /> {editorDocument.watermark ? 'Update' : 'Apply'}
+              </button>
+              <button
+                type="button"
+                disabled={!editorDocument.watermark}
+                onClick={() => {
+                  dispatch({ type: 'setWatermark', watermark: null })
+                  setWatermarkDraft(null)
+                }}
+              >
+                <X size={17} /> Clear
+              </button>
+            </div>
+          </section>
+
           <button
             type="button"
-            className="export-button"
-            disabled={!editorDocument || busy !== null}
-            onClick={() => void saveDocument()}
+            className="delete-button"
+            disabled={editorDocument.pages.length <= selectedPages.length}
+            onClick={deleteSelected}
           >
-            {busy === 'exporting' ? (
-              <LoaderCircle className="spin" size={17} />
-            ) : (
-              <Download size={17} />
-            )}
-            Export PDF
+            <Trash2 size={17} /> Remove {selectedPages.length > 1 ? `${selectedPages.length} pages` : 'page'}
           </button>
           <button
             type="button"
-            className="export-button export-button-redacted"
-            disabled={!editorDocument || !hasRedactions || busy !== null}
-            title={
-              hasRedactions
-                ? 'Rasterize pages with redaction marks so hidden text cannot be copied'
-                : 'Add redaction marks before exporting securely'
-            }
-            onClick={() => void saveRedactedDocument()}
+            className="popover-close"
+            onClick={() => setWatermarkOpen(false)}
           >
-            {busy === 'redacting' ? (
-              <LoaderCircle className="spin" size={17} />
-            ) : (
-              <EyeOff size={17} />
-            )}
-            Export redacted
+            Done
           </button>
         </div>
-      </header>
+      )}
 
       {error && (
         <div className="error-banner" role="alert">
@@ -1931,14 +1722,6 @@ export function App() {
       ) : (
         <main className="workspace">
           <aside className="page-rail" aria-label="Document pages">
-            <div className="panel-heading">
-              <div>
-                <span className="panel-kicker">DOCUMENT</span>
-                <h2>Navigator</h2>
-              </div>
-              <span className="count-badge">{editorDocument.pages.length}</span>
-            </div>
-
             <div className="navigator-tabs" role="tablist" aria-label="Navigator view">
               <button
                 type="button"
@@ -1958,6 +1741,16 @@ export function App() {
                   <BookOpen size={14} /> Bookmarks
                 </button>
               )}
+              {analyseSummary && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={navigatorMode === 'text'}
+                  onClick={() => setNavigatorMode('text')}
+                >
+                  <ScanSearch size={14} /> Text
+                </button>
+              )}
               <button
                 type="button"
                 role="tab"
@@ -1970,6 +1763,70 @@ export function App() {
                 <Search size={14} /> Search
               </button>
             </div>
+
+            {navigatorMode === 'text' && (
+              <div className="navigator-content text-panel">
+                <p className="navigator-note">
+                  {busy === 'analysing'
+                    ? analysingLabel(analyseProgress)
+                    : analyseSummary && analyseSummary.blocks === 0
+                      ? scannedPageHint(ocrConsent)
+                      : `${analyseSummary?.blocks ?? 0} line${analyseSummary?.blocks === 1 ? '' : 's'} found${analyseSummary?.ocrPages ? ` · ${analyseSummary.ocrPages} from scans` : ''}. Edit here or on the page.`}
+                </p>
+              {selectedPage &&
+                selectedPage.overlays.some((overlay) => overlay.extracted) && (
+                  <ul className="extracted-text-list">
+                    {selectedPage.overlays
+                      .filter((overlay) => overlay.extracted)
+                      .map((overlay) => (
+                        <li key={overlay.id}>
+                          <div
+                            className={`extracted-text-row${
+                              selectedOverlayId === overlay.id ? ' is-active' : ''
+                            }${overlay.edited ? ' is-edited' : ''}${
+                              overlay.overflow ? ' is-overflowing' : ''
+                            }`}
+                          >
+                            <OverlayTextField
+                              overlay={overlay}
+                              rows={2}
+                              onFocus={() => {
+                                setAnnotationTool('select')
+                                setSelectedOverlayId(overlay.id)
+                              }}
+                              onCommit={(text) =>
+                                updateSelectedOverlay(overlay.id, { text })
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="extracted-text-locate"
+                              title="Show this line on the page"
+                              aria-label={`Show on page: ${overlay.text || 'Empty line'}`}
+                              onClick={() => {
+                                setAnnotationTool('select')
+                                setSelectedOverlayId(overlay.id)
+                              }}
+                            >
+                              <Crosshair size={14} />
+                            </button>
+                            {overlay.overflow && (
+                              <p className="extracted-text-warning">
+                                <TriangleAlert size={13} />
+                                Too long for the space here, even at the smallest size.
+                              </p>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+                {selectedPage &&
+                  !selectedPage.overlays.some((overlay) => overlay.extracted) && (
+                    <p className="navigator-empty">No text found on this page.</p>
+                  )}
+              </div>
+            )}
 
             {navigatorMode === 'pages' && (
               <ol className="thumbnail-list">
@@ -2129,16 +1986,53 @@ export function App() {
               </div>
             )}
 
-            <div className="rail-hint">
-              {navigatorMode === 'pages' ? (
-                <><Grab size={14} /> Shift-click a range · Cmd/Ctrl-click to toggle</>
-              ) : null}
-            </div>
           </aside>
 
-          <section ref={stageRef} className="document-stage" aria-label="Page workspace">
+          <section className="document-stage" aria-label="Page workspace">
             <div className="stage-grid" aria-hidden="true" />
-            <div className="view-controls" aria-label="Page navigation and view controls">
+            {editorDocument && (
+              <div className="island island-tools" role="toolbar" aria-label="Annotation tools">
+                {ANNOTATE_PALETTE.map((item) => {
+                  const Icon = item.icon
+                  const active = item.id !== 'signature' && annotationTool === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`tool-chip${active ? ' is-active' : ''}`}
+                      aria-label={item.label}
+                      aria-pressed={item.id === 'signature' ? undefined : active}
+                      title={item.label}
+                      onClick={() => {
+                        if (item.id === 'signature') {
+                          setSignatureOpen(true)
+                          return
+                        }
+                        chooseAnnotationTool(item.id)
+                      }}
+                    >
+                      <Icon size={17} />
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <div className="island view-controls" aria-label="Page navigation and view controls">
+              <IconButton
+                label="Undo"
+                disabled={history.past.length === 0}
+                onClick={() => dispatch({ type: 'undo' })}
+              >
+                <Undo2 size={17} />
+              </IconButton>
+              <IconButton
+                label="Redo"
+                disabled={history.future.length === 0}
+                onClick={() => dispatch({ type: 'redo' })}
+              >
+                <Redo2 size={17} />
+              </IconButton>
+              <span className="view-divider" aria-hidden="true" />
               <IconButton
                 label="Previous page"
                 disabled={selectedIndex <= 0}
@@ -2210,6 +2104,7 @@ export function App() {
                 <Plus size={17} />
               </IconButton>
             </div>
+            <div ref={stageRef} className="stage-scroll">
             {selectedPage && selectedSession && (
               <div className="focused-page">
                 <div className="page-shadow">
@@ -2267,104 +2162,11 @@ export function App() {
                 </span>
               </div>
             )}
+            </div>
           </section>
 
-          <aside className="inspector" aria-label="Page tools">
-            <div className="panel-heading inspector-heading">
-              <div>
-                <span className="panel-kicker">SELECTED</span>
-                <h2>
-                  {selectedPages.length === 1
-                    ? `Page ${selectedIndex + 1}`
-                    : `${selectedPages.length} pages`}
-                </h2>
-              </div>
-            </div>
-
-            <section className="tool-section text-analysis-tools">
-              <h3>Document text</h3>
-              <button
-                type="button"
-                className="analyse-button"
-                disabled={busy !== null}
-                onClick={() => void analyseDocument()}
-              >
-                {busy === 'analysing' ? (
-                  <LoaderCircle className="spin" size={16} />
-                ) : (
-                  <ScanSearch size={16} />
-                )}
-                {busy === 'analysing'
-                  ? analysingLabel(analyseProgress)
-                  : analyseSummary
-                    ? 'Re-analyse text'
-                    : 'Analyse text'}
-              </button>
-              {analyseSummary ? (
-                <p className="tool-hint">
-                  {analyseSummary.blocks === 0
-                    ? scannedPageHint(ocrConsent)
-                    : `${analyseSummary.blocks} text block${analyseSummary.blocks === 1 ? '' : 's'} on ${analyseSummary.pagesWithText} page${analyseSummary.pagesWithText === 1 ? '' : 's'}${analyseSummary.ocrPages ? ` · ${analyseSummary.ocrPages} read from scans` : ''}${analyseSummary.emptyPages ? ` · ${analyseSummary.emptyPages} without text` : ''}. Click a line on the page to type. Re-analyse replaces extracted lines.`}
-                </p>
-              ) : (
-                <p className="tool-hint">
-                  Read every page locally, then turn found lines into editable boxes. Scanned pages can use this browser’s on-device detector, or Tesseract OCR downloaded from this GitHub Pages site after you agree. Recognition stays in the browser.
-                </p>
-              )}
-              {selectedPage &&
-                selectedPage.overlays.some((overlay) => overlay.extracted) && (
-                  <ul className="extracted-text-list">
-                    {selectedPage.overlays
-                      .filter((overlay) => overlay.extracted)
-                      .map((overlay) => (
-                        <li key={overlay.id}>
-                          <button
-                            type="button"
-                            className={`extracted-text-item${
-                              selectedOverlayId === overlay.id ? ' is-active' : ''
-                            }`}
-                            onClick={() => {
-                              setAnnotationTool('select')
-                              setSelectedOverlayId(overlay.id)
-                            }}
-                          >
-                            {overlay.edited ? 'Edited · ' : ''}
-                            {overlay.text || 'Empty line'}
-                          </button>
-                        </li>
-                      ))}
-                  </ul>
-                )}
-            </section>
-
-            <section className="tool-section annotation-tools">
-              <h3>Annotate</h3>
-              <div className="annotation-tool-grid" role="toolbar" aria-label="Annotation tools">
-                {ANNOTATE_PALETTE.map((item) => {
-                  const Icon = item.icon
-                  const active = item.id !== 'signature' && annotationTool === item.id
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={active ? 'is-active' : ''}
-                      aria-label={item.label}
-                      aria-pressed={item.id === 'signature' ? undefined : active}
-                      title={item.label}
-                      onClick={() => {
-                        if (item.id === 'signature') {
-                          setSignatureOpen(true)
-                          return
-                        }
-                        chooseAnnotationTool(item.id)
-                      }}
-                    >
-                      <Icon size={16} />
-                      <span>{item.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
+          {showInspector && (
+          <aside className="inspector island" aria-label="Tool options">
               {(annotationUsesColour(annotationTool) ||
                 annotationUsesWeight(annotationTool) ||
                 annotationUsesFill(annotationTool)) && (
@@ -2439,7 +2241,8 @@ export function App() {
                   )}
                 </div>
               )}
-              {pendingSignature ? (
+            {annotationTool !== 'select' || pendingSignature ? (
+              pendingSignature ? (
                 <p className="tool-hint">
                   Click the page to place your signature. Sign another page the same way, or press Escape to finish.
                 </p>
@@ -2451,44 +2254,17 @@ export function App() {
                   )
                   return hint ? <p className="tool-hint">{hint}</p> : null
                 })()
-              )}
-            </section>
-
-            <section className="tool-section redaction-tools">
-              <h3>Redaction</h3>
+              )
+            ) : null}
+            {(annotationTool === 'redaction' || totalRedactions > 0) && (
               <p className="tool-hint">
                 {totalRedactions === 0
-                  ? 'Choose Redact above, then drag over sensitive text or areas. Export PDF only covers visually; Export redacted permanently removes hidden text on marked pages.'
-                  : `${totalRedactions} mark${totalRedactions === 1 ? '' : 's'} on ${pagesWithRedactions} page${pagesWithRedactions === 1 ? '' : 's'}. Use Export redacted in the toolbar to secure them.`}
+                  ? 'Drag black boxes over anything sensitive.'
+                  : `${totalRedactions} mark${totalRedactions === 1 ? '' : 's'} on ${pagesWithRedactions} page${pagesWithRedactions === 1 ? '' : 's'} · Export removes what is under them.`}
               </p>
-              {selectedPage &&
-                selectedPage.overlays.some((overlay) => overlay.type === 'redaction') && (
-                  <ul className="extracted-text-list redaction-mark-list">
-                    {selectedPage.overlays
-                      .filter((overlay) => overlay.type === 'redaction')
-                      .map((overlay, index) => (
-                        <li key={overlay.id}>
-                          <button
-                            type="button"
-                            className={`extracted-text-item${
-                              selectedOverlayId === overlay.id ? ' is-active' : ''
-                            }`}
-                            onClick={() => {
-                              setAnnotationTool('select')
-                              setSelectedOverlayId(overlay.id)
-                            }}
-                          >
-                            Mark {index + 1}
-                          </button>
-                        </li>
-                      ))}
-                  </ul>
-                )}
-            </section>
-
+            )}
             {selectedOverlay && (
               <section className="tool-section annotation-properties">
-                <h3>Selected {selectedOverlay.type}</h3>
                 {selectedOverlay.type === 'text' && (
                   <label>
                     <span>Text</span>
@@ -2641,183 +2417,8 @@ export function App() {
                 </div>
               </section>
             )}
-
-            {!selectedOverlay && overlayClipboard && (
-              <section className="tool-section clipboard-tools">
-                <button type="button" onClick={pasteOverlay}>
-                  <ClipboardPaste size={16} /> Paste copied annotation
-                </button>
-              </section>
-            )}
-
-            <section className="tool-section">
-              <h3>Arrange</h3>
-              <div className="button-grid">
-                <button
-                  type="button"
-                  disabled={!canMoveEarlier}
-                  onClick={() => moveSelected(-1)}
-                >
-                  <ArrowUp size={17} /> Earlier
-                </button>
-                <button
-                  type="button"
-                  disabled={!canMoveLater}
-                  onClick={() => moveSelected(1)}
-                >
-                  <ArrowDown size={17} /> Later
-                </button>
-              </div>
-            </section>
-
-            <section className="tool-section">
-              <h3>Rotate</h3>
-              <div className="button-grid">
-                <button
-                  type="button"
-                  onClick={() =>
-                    dispatch({
-                      type: 'rotate',
-                      pageIds: selectedPages.map((page) => page.id),
-                      degrees: -90,
-                    })
-                  }
-                >
-                  <RotateCcw size={17} /> Left
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    dispatch({
-                      type: 'rotate',
-                      pageIds: selectedPages.map((page) => page.id),
-                      degrees: 90,
-                    })
-                  }
-                >
-                  <RotateCw size={17} /> Right
-                </button>
-              </div>
-            </section>
-
-            <section className="tool-section page-details">
-              <h3>Page details</h3>
-              <dl>
-                <div><dt>Selected</dt><dd>{selectedPages.length}</dd></div>
-                <div><dt>Position</dt><dd>{selectedIndex + 1}</dd></div>
-                <div><dt>Source</dt><dd>{selectedPages.length === 1 ? editorDocument.sources.find(({ id }) => id === selectedPage?.sourceDocumentId)?.name ?? 'Unknown' : 'Multiple'}</dd></div>
-                <div><dt>Source page</dt><dd>{selectedPages.length === 1 ? (selectedPage?.sourcePageIndex ?? 0) + 1 : '—'}</dd></div>
-                <div><dt>Rotation</dt><dd>{selectedPages.length === 1 ? `${selectedPage?.rotationDelta ?? 0}°` : 'Mixed'}</dd></div>
-              </dl>
-            </section>
-
-            <section className="tool-section">
-              <h3>Create</h3>
-              <div className="button-grid">
-                <button type="button" onClick={duplicateSelected}>
-                  <Copy size={17} /> Duplicate{selectedPages.length > 1 ? ` ${selectedPages.length}` : ''}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => void extractSelected()}
-                >
-                  <Scissors size={17} /> Extract{selectedPages.length > 1 ? ` ${selectedPages.length}` : ''}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => void exportSelectedPng()}
-                >
-                  <ImageDown size={17} /> Page PNG
-                </button>
-              </div>
-            </section>
-
-            <section className="tool-section watermark-tools">
-              <h3>Watermark all pages</h3>
-              <label>
-                <span className="visually-hidden">Watermark text</span>
-                <input
-                  type="text"
-                  value={watermarkFields.text}
-                  maxLength={80}
-                  placeholder="Draft, confidential…"
-                  onChange={(event) =>
-                    updateWatermarkDraft({ text: event.currentTarget.value })
-                  }
-                />
-              </label>
-              <div className="property-row">
-                <span>Opacity</span>
-                <div className="property-options">
-                  {[0.1, 0.15, 0.2, 0.3, 0.4].map((opacity) => (
-                    <button
-                      key={opacity}
-                      type="button"
-                      className={watermarkFields.opacity === opacity ? 'is-active' : ''}
-                      onClick={() => updateWatermarkDraft({ opacity })}
-                    >
-                      {Math.round(opacity * 100)}%
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="property-row">
-                <span>Angle</span>
-                <div className="property-options">
-                  {[-45, -30, 0, 30, 45].map((rotation) => (
-                    <button
-                      key={rotation}
-                      type="button"
-                      className={watermarkFields.rotation === rotation ? 'is-active' : ''}
-                      onClick={() => updateWatermarkDraft({ rotation })}
-                    >
-                      {rotation}°
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="button-grid">
-                <button
-                  type="button"
-                  disabled={watermarkFields.text.trim().length === 0}
-                  onClick={() => {
-                    dispatch({
-                      type: 'setWatermark',
-                      watermark: {
-                        text: watermarkFields.text.trim(),
-                        opacity: watermarkFields.opacity,
-                        rotation: watermarkFields.rotation,
-                      },
-                    })
-                    setWatermarkDraft(null)
-                  }}
-                >
-                  <Type size={17} /> {editorDocument.watermark ? 'Update' : 'Apply'}
-                </button>
-                <button
-                  type="button"
-                  disabled={!editorDocument.watermark}
-                  onClick={() => {
-                    dispatch({ type: 'setWatermark', watermark: null })
-                    setWatermarkDraft(null)
-                  }}
-                >
-                  <X size={17} /> Clear
-                </button>
-              </div>
-            </section>
-
-            <button
-              type="button"
-              className="delete-button"
-              disabled={editorDocument.pages.length <= selectedPages.length}
-              onClick={deleteSelected}
-            >
-              <Trash2 size={17} /> Remove {selectedPages.length > 1 ? `${selectedPages.length} pages` : 'page'}
-            </button>
           </aside>
+          )}
         </main>
       )}
 

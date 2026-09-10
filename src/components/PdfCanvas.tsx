@@ -10,6 +10,7 @@ import type { SavedSignature } from '../domain/preferences'
 import { createSignatureOverlay } from '../pdf/signatureImage'
 import { sampleOverlayPixels, type SampledAppearance } from '../pdf/pageSample'
 import { AnnotationLayer, type AnnotationTool } from './AnnotationLayer'
+import { RedactionLayer } from './RedactionLayer'
 
 interface PdfCanvasProps {
   document: PDFDocumentProxy
@@ -230,6 +231,10 @@ export function PdfCanvas({
     pendingSignature,
   ])
 
+  // Redaction owns its own layer: marking is a distinct mode, not another draw tool.
+  const hasPageLayer = display.width > 0 && display.height > 0
+  const redactMode = interactiveAnnotations && annotationTool === 'redaction'
+
   return (
     <div
       ref={wrapRef}
@@ -252,7 +257,15 @@ export function PdfCanvas({
           style={{ width: `${stamp.size * 100}%`, opacity: stamp.opacity }}
         />
       )}
-      {display.width > 0 && display.height > 0 && (
+      {!hasPageLayer ? null : redactMode ? (
+        <RedactionLayer
+          width={display.width}
+          height={display.height}
+          overlays={overlays}
+          onCreate={onCreateOverlay}
+          onPageContextMenu={onPageContextMenu}
+        />
+      ) : (
         <AnnotationLayer
           width={display.width}
           height={display.height}

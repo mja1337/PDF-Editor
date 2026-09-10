@@ -1,3 +1,5 @@
+import type { ColorSegment } from './inkSegments'
+
 export interface ExtractedTextRun {
   text: string
   x: number
@@ -10,6 +12,7 @@ export interface ExtractedTextRun {
   fontItalic?: boolean
   color?: string
   backgroundColor?: string
+  colorSegments?: ColorSegment[]
 }
 
 function clamp01(value: number) {

@@ -114,6 +114,7 @@ export function createExtractedOverlay(run: {
   fontItalic?: boolean
   color?: string
   backgroundColor?: string
+  colorSegments?: PageOverlay['colorSegments']
   scanned?: boolean
 }): PageOverlay {
   return normalizeOverlay({
@@ -136,6 +137,8 @@ export function createExtractedOverlay(run: {
     scanned: Boolean(run.scanned),
     cover: false,
     backgroundColor: run.backgroundColor ?? '#ffffff',
+    colorSegments: run.colorSegments,
+    source: { width: run.width, height: run.height, fontSize: run.fontSize },
   })
 }
 

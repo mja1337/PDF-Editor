@@ -4,7 +4,6 @@ import { groupTextRuns, type ExtractedTextRun } from '../src/pdf/textGeometry'
 import {
   caretIndexAtX,
   fitOverlayToText,
-  overlayAtPageMargin,
   overlayFontPx,
   PAGE_EDGE_MARGIN,
   wrapTextToWidth,
@@ -82,37 +81,12 @@ describe('text layout', () => {
     expect(caretIndexAtX('Hello', 48, measure)).toBe(5)
   })
 
-  it('grows extracted replacements toward the page margin, then wraps', () => {
+  it('grows a text note toward the page margin, then wraps', () => {
     expect(wrapTextToWidth('one two three', 75, measure)).toEqual([
       'one two',
       'three',
     ])
     expect(wrapTextToWidth('supercalifragilistic', 50, measure)[0]?.length).toBeLessThanOrEqual(5)
-
-    const grown = fitOverlayToText(
-      { x: 0.1, y: 0.2, width: 0.2, height: 0.04, fontSize: 12, extracted: true },
-      'This replacement is much longer than the original run',
-      1000,
-      1400,
-      1,
-      measure,
-    )
-    expect(grown.width).toBeGreaterThan(0.2)
-    expect(grown.width).toBeLessThan(1 - PAGE_EDGE_MARGIN - 0.1 + 1e-6)
-    expect(grown.height).toBeCloseTo(0.04)
-    expect(overlayAtPageMargin({ x: 0.1, ...grown })).toBe(false)
-
-    const wrapped = fitOverlayToText(
-      { x: 0.1, y: 0.2, width: 0.2, height: 0.03, fontSize: 12, extracted: true },
-      'x'.repeat(400),
-      1000,
-      1400,
-      1,
-      measure,
-    )
-    expect(wrapped.width).toBeCloseTo(1 - PAGE_EDGE_MARGIN - 0.1)
-    expect(wrapped.height).toBeGreaterThan(0.03)
-    expect(overlayAtPageMargin({ x: 0.1, ...wrapped })).toBe(true)
 
     const note = fitOverlayToText(
       { x: 0.1, y: 0.2, width: 0.2, height: 0.04, fontSize: 12 },
@@ -134,19 +108,6 @@ describe('text layout', () => {
     )
     expect(compact.width).toBeLessThan(0.12)
     expect(compact.height).toBeLessThan(0.05)
-  })
-
-  it('keeps the original box when the replacement is shorter', () => {
-    const fitted = fitOverlayToText(
-      { x: 0.1, y: 0.2, width: 0.4, height: 0.05, fontSize: 12, extracted: true },
-      'Hi',
-      1000,
-      1400,
-      1,
-      measure,
-    )
-    expect(fitted.width).toBeCloseTo(0.4, 5)
-    expect(fitted.height).toBeCloseTo(0.05, 5)
   })
 
   it('scales overlay type with the page preview instead of clamping to 8px', () => {

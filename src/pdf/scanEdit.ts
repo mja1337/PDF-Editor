@@ -1,6 +1,16 @@
 import type { PageOverlay } from '../domain/document'
 import { cssFontFamily } from './fontMatch'
-import { wrapTextToWidth } from './textLayout'
+import {
+  EXTRACTED_LINE_HEIGHT,
+  layoutExtractedLines,
+  normalizeExtractedText,
+} from './extractedTextFit'
+import {
+  lineColorSegments,
+  normalizeColoredText,
+  segmentsToColors,
+  type ColorSegment,
+} from './inkSegments'
 
 export type CoverBox = {
   x: number
@@ -21,18 +31,51 @@ export function canFlattenScanEdits() {
   return typeof document !== 'undefined' && typeof HTMLCanvasElement !== 'undefined'
 }
 
+/** Bleed that hides ascenders and descenders of the covered line. */
+const COVER_BLEED = 0.16
+
+function verticalGaps(
+  overlay: Pick<PageOverlay, 'x' | 'y' | 'width' | 'height'>,
+  neighbours: ReadonlyArray<PageOverlay>,
+) {
+  const right = overlay.x + overlay.width
+  const bottom = overlay.y + overlay.height
+  let above = overlay.y
+  let below = 1 - bottom
+  for (const other of neighbours) {
+    if (!other.extracted || other === overlay) continue
+    if (other.x >= right || other.x + other.width <= overlay.x) continue
+    const otherBottom = other.y + other.height
+    if (otherBottom <= overlay.y) above = Math.min(above, overlay.y - otherBottom)
+    else if (other.y >= bottom) below = Math.min(below, other.y - bottom)
+  }
+  return { above: Math.max(0, above), below: Math.max(0, below) }
+}
+
+/**
+ * The rectangle painted over an original line before its replacement is drawn.
+ * The bleed is capped at half the clear space to the neighbouring lines, so a
+ * tight block such as an address never has its other rows wiped out.
+ */
 export function coverBox(
   overlay: Pick<PageOverlay, 'x' | 'y' | 'width' | 'height'>,
+  neighbours: ReadonlyArray<PageOverlay> = [],
 ): CoverBox {
-  const padY = overlay.height * 0.42
-  const padX = Math.max(overlay.height * 0.28, overlay.width * 0.01)
+  const gaps = verticalGaps(overlay, neighbours)
+  const bleed = overlay.height * COVER_BLEED
+  const padTop = Math.min(bleed, gaps.above / 2)
+  const padBottom = Math.min(bleed, gaps.below / 2)
+  const padX = Math.min(
+    Math.max(overlay.height * 0.12, overlay.width * 0.01),
+    overlay.x,
+  )
   const x = Math.max(0, overlay.x - padX)
-  const y = Math.max(0, overlay.y - padY)
+  const y = Math.max(0, overlay.y - padTop)
   return {
     x,
     y,
     width: Math.min(1 - x, overlay.width + padX * 2),
-    height: Math.min(1 - y, overlay.height + padY * 2),
+    height: Math.min(1 - y, overlay.height + padTop + padBottom),
   }
 }
 
@@ -75,7 +118,7 @@ export function paintScannedEdits(
   const source = canvas
   for (const overlay of overlays) {
     if (!isScannedTextEdit(overlay)) continue
-    const box = coverBox(overlay)
+    const box = coverBox(overlay, overlays)
     const x = box.x * width
     const y = box.y * height
     const boxWidth = box.width * width
@@ -84,13 +127,12 @@ export function paintScannedEdits(
     const paper = overlay.backgroundColor ?? '#f3eee4'
     fillPaper(context, source, x, y, boxWidth, boxHeight, paper)
 
-    const text = (overlay.text || '').replace(/\s+/g, ' ').trim()
+    const text = normalizeExtractedText(overlay.text || '')
     if (!text) continue
     const size = Math.max(5, (overlay.fontSize ?? boxHeight) * renderScale)
     const padX = Math.max(1, size * 0.08)
     const padY = Math.max(1, size * 0.14)
     const textX = overlay.x * width + padX
-    const maxWidth = Math.max(4, overlay.width * width - padX * 2)
     context.save()
     context.beginPath()
     context.rect(x, y, boxWidth, boxHeight)
@@ -99,17 +141,47 @@ export function paintScannedEdits(
     context.fillStyle = overlay.color || '#1a1a1a'
     context.textAlign = 'left'
     context.font = scanFont(overlay, size)
-    const fitsOnLine = context.measureText(text).width <= maxWidth
-    if (fitsOnLine) {
+    const lines = layoutExtractedLines(
+      text,
+      overlay.width * width,
+      size,
+      (value, fontSize) => {
+        context.font = scanFont(overlay, fontSize)
+        return context.measureText(value).width
+      },
+    )
+    context.font = scanFont(overlay, size)
+    const inked = overlay.colorSegments
+      ? normalizeColoredText(overlay.text ?? '', segmentsToColors(overlay.colorSegments))
+      : null
+    const inkedLines = inked ? lineColorSegments(inked.text, inked.colors, lines) : null
+    const paintLine = (
+      line: string,
+      pieces: ColorSegment[] | undefined,
+      lineY: number,
+    ) => {
+      if (!pieces || pieces.length === 0) {
+        context.fillStyle = overlay.color || '#1a1a1a'
+        context.fillText(line, textX, lineY)
+        return
+      }
+      let offset = 0
+      for (const piece of pieces) {
+        context.fillStyle = piece.color
+        context.fillText(piece.text, textX + offset, lineY)
+        offset += context.measureText(piece.text).width
+      }
+    }
+    if (lines.length === 1) {
       context.textBaseline = 'middle'
-      context.fillText(text, textX, y + boxHeight / 2)
+      paintLine(lines[0] ?? '', inkedLines?.[0], y + boxHeight / 2)
     } else {
       context.textBaseline = 'top'
-      const lines = wrapTextToWidth(text, maxWidth, (value) => context.measureText(value).width)
       let textY = overlay.y * height + padY
-      for (const line of lines) {
-        if (line) context.fillText(line, textX, textY)
-        textY += size
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index]
+        if (line) paintLine(line, inkedLines?.[index], textY)
+        textY += size * EXTRACTED_LINE_HEIGHT
       }
     }
     context.restore()

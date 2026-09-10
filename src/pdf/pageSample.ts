@@ -98,6 +98,51 @@ export function samplePatch(image: PixelBuffer): SampledAppearance {
   }
 }
 
+function parseHex(color: string) {
+  const value = color.replace('#', '')
+  const number = Number.parseInt(value, 16)
+  if (value.length !== 6 || Number.isNaN(number)) return { r: 255, g: 255, b: 255 }
+  return { r: (number >> 16) & 255, g: (number >> 8) & 255, b: number & 255 }
+}
+
+/**
+ * The ink colour inside one glyph cell, or null when the cell holds no ink.
+ * Used to keep a coloured mark inside an otherwise monochrome line.
+ */
+export function sampleCellInk(
+  image: PixelBuffer,
+  rect: { x: number; y: number; width: number; height: number },
+  backgroundColor: string,
+  minPixels = 4,
+): string | null {
+  const background = parseHex(backgroundColor)
+  const left = Math.max(0, Math.floor(rect.x * image.width))
+  const top = Math.max(0, Math.floor(rect.y * image.height))
+  const right = Math.min(image.width, Math.ceil((rect.x + rect.width) * image.width))
+  const bottom = Math.min(image.height, Math.ceil((rect.y + rect.height) * image.height))
+  if (right <= left || bottom <= top) return null
+
+  const ink: Array<{ r: number; g: number; b: number; contrast: number }> = []
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const index = (y * image.width + x) * 4
+      const r = image.data[index] ?? 0
+      const g = image.data[index + 1] ?? 0
+      const b = image.data[index + 2] ?? 0
+      const amount = contrast(r, g, b, background)
+      if (amount >= 48) ink.push({ r, g, b, contrast: amount })
+    }
+  }
+  if (ink.length < minPixels) return null
+  ink.sort((left_, right_) => right_.contrast - left_.contrast)
+  const top_ = ink.slice(0, Math.max(1, Math.ceil(ink.length * 0.5)))
+  return hex(
+    median(top_.map((pixel) => pixel.r)),
+    median(top_.map((pixel) => pixel.g)),
+    median(top_.map((pixel) => pixel.b)),
+  )
+}
+
 export function sampleNormalizedRect(
   image: PixelBuffer,
   rect: { x: number; y: number; width: number; height: number },
