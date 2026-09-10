@@ -66,6 +66,7 @@ import {
   ContextMenu,
   type ContextMenuItem,
 } from './components/ContextMenu'
+import { PasswordDialog } from './components/PasswordDialog'
 import { PdfCanvas } from './components/PdfCanvas'
 import { ServiceWorkerStatus } from './components/ServiceWorkerStatus'
 import {
@@ -352,6 +353,10 @@ export function App() {
   const ocrConsentRef = useRef(ocrConsent)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ocrPromptOpen, setOcrPromptOpen] = useState(false)
+  const [passwordPrompt, setPasswordPrompt] = useState<{
+    fileName: string
+    incorrect: boolean
+  } | null>(null)
   const [inkWidth, setInkWidth] = useState(2)
   const [toolWeights, setToolWeights] = useState<Partial<Record<AnnotationTool, number>>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -364,6 +369,7 @@ export function App() {
   const selectionAnchorRef = useRef<string | null>(null)
   const searchAbortRef = useRef<AbortController | null>(null)
   const analyseAbortRef = useRef<AbortController | null>(null)
+  const passwordPromptRef = useRef<((password: string | null) => void) | null>(null)
   const editorDocument = history.present
 
   const requestedSelectedIndex =
@@ -458,6 +464,19 @@ export function App() {
     [],
   )
 
+  const promptPdfPassword = useCallback((fileName: string, incorrect: boolean) => {
+    return new Promise<string | null>((resolve) => {
+      passwordPromptRef.current = resolve
+      setPasswordPrompt({ fileName, incorrect })
+    })
+  }, [])
+
+  const finishPasswordPrompt = useCallback((password: string | null) => {
+    passwordPromptRef.current?.(password)
+    passwordPromptRef.current = null
+    setPasswordPrompt(null)
+  }, [])
+
   const loadPdfFiles = useCallback(async (files: File[], replace: boolean) => {
     if (files.length === 0) return
     searchAbortRef.current?.abort()
@@ -470,7 +489,13 @@ export function App() {
     try {
       for (const file of files) {
         const sourceId = crypto.randomUUID()
-        imported.push({ sourceId, session: await openPdf(file), file })
+        imported.push({
+          sourceId,
+          session: await openPdf(file, {
+            promptPassword: ({ incorrect }) => promptPdfPassword(file.name, incorrect),
+          }),
+          file,
+        })
       }
 
       if (sequence !== loadSequence.current) {
@@ -534,13 +559,18 @@ export function App() {
       await destroySessions(
         new Map(imported.map(({ sourceId, session }) => [sourceId, session])),
       )
-      setError(userFacingError(loadError, 'The PDF could not be opened.'))
+      setError(
+        loadError instanceof Error && loadError.message === 'Password entry was cancelled.'
+          ? 'Opening was cancelled.'
+          : userFacingError(loadError, 'The PDF could not be opened.'),
+      )
     } finally {
       if (sequence === loadSequence.current) setBusy(null)
+      finishPasswordPrompt(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
       if (addPdfInputRef.current) addPdfInputRef.current.value = ''
     }
-  }, [selectedPageId])
+  }, [finishPasswordPrompt, promptPdfPassword, selectedPageId])
 
   const loadImageFiles = useCallback(async (files: File[], replace: boolean) => {
     if (files.length === 0) return
@@ -638,19 +668,34 @@ export function App() {
     [],
   )
 
+  const sourcePasswords = useCallback(
+    () =>
+      new Map(
+        [...sessionsRef.current].flatMap(([sourceId, session]) =>
+          session.openPassword ? [[sourceId, session.openPassword] as const] : [],
+        ),
+      ),
+    [],
+  )
+
   const saveDocument = useCallback(async () => {
     if (!editorDocument || sessions.size === 0 || busy) return
     setBusy('exporting')
     setError(null)
     try {
-      const bytes = await exportPdf(sourceBytes(), editorDocument)
+      const bytes = await exportPdf(
+        sourceBytes(),
+        editorDocument,
+        undefined,
+        sourcePasswords(),
+      )
       downloadPdf(bytes, editorDocument.name)
     } catch (cause) {
       setError(userFacingError(cause, 'The edited PDF could not be exported. Your source file is unchanged.'))
     } finally {
       setBusy(null)
     }
-  }, [busy, editorDocument, sessions, sourceBytes])
+  }, [busy, editorDocument, sessions, sourceBytes, sourcePasswords])
 
   const extractSelected = useCallback(async () => {
     if (selectedPages.length === 0 || !editorDocument || busy) return
@@ -668,12 +713,17 @@ export function App() {
         selectedPages.length === 1
           ? `page-${selectedIndex + 1}.pdf`
           : `${selectedPages.length}-selected-pages.pdf`
-      const bytes = await exportPdf(sourceBytes(), {
-        ...editorDocument,
-        name: outputName,
-        sources,
-        pages: selectedPages,
-      })
+      const bytes = await exportPdf(
+        sourceBytes(),
+        {
+          ...editorDocument,
+          name: outputName,
+          sources,
+          pages: selectedPages,
+        },
+        undefined,
+        sourcePasswords(),
+      )
       downloadPdf(bytes, outputName)
     } catch (extractError) {
       setError(
@@ -684,18 +734,23 @@ export function App() {
     } finally {
       setBusy(null)
     }
-  }, [busy, editorDocument, selectedIndex, selectedPages, sourceBytes])
+  }, [busy, editorDocument, selectedIndex, selectedPages, sourceBytes, sourcePasswords])
 
   const exportSelectedPng = useCallback(async () => {
     if (!selectedPage || !selectedSession || !editorDocument || busy) return
     setBusy('rendering')
     setError(null)
     try {
-      const bytes = await exportPdf(sourceBytes(), {
-        ...editorDocument,
-        sources: editorDocument.sources.filter(({ id }) => id === selectedPage.sourceDocumentId),
-        pages: [selectedPage],
-      })
+      const bytes = await exportPdf(
+        sourceBytes(),
+        {
+          ...editorDocument,
+          sources: editorDocument.sources.filter(({ id }) => id === selectedPage.sourceDocumentId),
+          pages: [selectedPage],
+        },
+        undefined,
+        sourcePasswords(),
+      )
       const rendered = await openPdfBytes(bytes)
       let blob: Blob
       try { blob = await renderPageToPng(rendered.viewer, 0, 0) }
@@ -707,7 +762,7 @@ export function App() {
     } finally {
       setBusy(null)
     }
-  }, [busy, editorDocument, selectedIndex, selectedPage, selectedSession, sourceBytes])
+  }, [busy, editorDocument, selectedIndex, selectedPage, selectedSession, sourceBytes, sourcePasswords])
 
   const closeDocument = useCallback(async () => {
     ++loadSequence.current
@@ -2459,6 +2514,15 @@ export function App() {
             await saveOcrConsent(consent)
             setOcrConsent(consent)
           }}
+        />
+      )}
+      {passwordPrompt && (
+        <PasswordDialog
+          key={`${passwordPrompt.fileName}:${passwordPrompt.incorrect}`}
+          fileName={passwordPrompt.fileName}
+          incorrect={passwordPrompt.incorrect}
+          onSubmit={(password) => finishPasswordPrompt(password)}
+          onCancel={() => finishPasswordPrompt(null)}
         />
       )}
       {signatureOpen && selectedPage && (

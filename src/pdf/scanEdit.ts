@@ -132,10 +132,11 @@ export async function flattenScannedPageEdits(
   sourcePageIndex: number,
   rotationDelta: number,
   overlays: PageOverlay[],
+  openPassword?: string,
 ): Promise<Uint8Array | null> {
   if (!canFlattenScanEdits() || !pageHasScannedEdits(overlays)) return null
   const { openPdfBytes } = await import('./engine')
-  const session = await openPdfBytes(sourceBytes.slice())
+  const session = await openPdfBytes(sourceBytes.slice(), { password: openPassword })
   try {
     const page = await session.viewer.getPage(sourcePageIndex + 1)
     const rotation = (page.rotate + rotationDelta + 360) % 360

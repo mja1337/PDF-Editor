@@ -9,10 +9,25 @@ GlobalWorkerOptions.workerSrc = workerUrl
 
 const MAX_FILE_SIZE = 250 * 1024 * 1024
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]
+const INCORRECT_PASSWORD = 2
 
 export interface PdfSession {
   bytes: Uint8Array
   viewer: PDFDocumentProxy
+  /** Password used to open the file; kept in memory for export and re-render only. */
+  openPassword?: string
+}
+
+export interface PasswordPromptContext {
+  incorrect: boolean
+  reason: 'required' | 'incorrect'
+}
+
+export type PasswordPrompt = (context: PasswordPromptContext) => Promise<string | null>
+
+export interface OpenPdfOptions {
+  password?: string
+  promptPassword?: PasswordPrompt
 }
 
 function pdfjsAssetUrl(folder: 'cmaps' | 'standard_fonts' | 'wasm' | 'iccs') {
@@ -32,9 +47,10 @@ function hasPdfSignature(bytes: Uint8Array) {
   return false
 }
 
-function documentLoadOptions(data: Uint8Array) {
+function documentLoadOptions(data: Uint8Array, password?: string) {
   return {
     data,
+    password,
     cMapUrl: pdfjsAssetUrl('cmaps'),
     cMapPacked: true,
     standardFontDataUrl: pdfjsAssetUrl('standard_fonts'),
@@ -46,34 +62,100 @@ function documentLoadOptions(data: Uint8Array) {
   }
 }
 
-export async function openPdf(file: File): Promise<PdfSession> {
+async function loadViewer(bytes: Uint8Array, options?: OpenPdfOptions): Promise<{
+  viewer: PDFDocumentProxy
+  openPassword?: string
+}> {
+  let openPassword = options?.password
+
+  const promptPassword = options?.promptPassword
+    ? async (context: PasswordPromptContext) => {
+        const password = await options.promptPassword!(context)
+        if (password) openPassword = password
+        return password
+      }
+    : undefined
+
+  if (!promptPassword) {
+    const loadingTask = getDocument(documentLoadOptions(bytes.slice(), openPassword))
+    const viewer = await loadingTask.promise
+    return { viewer, openPassword }
+  }
+
+  return new Promise((resolve, reject) => {
+    const loadingTask = getDocument(documentLoadOptions(bytes.slice()))
+    let settled = false
+
+    loadingTask.onPassword = (
+      updatePassword: (password: string) => void,
+      reason: number,
+    ) => {
+      void promptPassword({
+        incorrect: reason === INCORRECT_PASSWORD,
+        reason: reason === INCORRECT_PASSWORD ? 'incorrect' : 'required',
+      }).then((password) => {
+        if (settled) return
+        if (!password) {
+          settled = true
+          void loadingTask.destroy()
+          reject(new Error('Password entry was cancelled.'))
+          return
+        }
+        updatePassword(password)
+      })
+    }
+
+    loadingTask.promise
+      .then((viewer) => {
+        if (settled) return
+        settled = true
+        resolve({ viewer, openPassword })
+      })
+      .catch((error) => {
+        if (settled) return
+        settled = true
+        if (reasonIsPassword(error) && !openPassword) {
+          reject(new Error('This PDF requires a password.', { cause: error }))
+          return
+        }
+        reject(error)
+      })
+  })
+}
+
+function reasonIsPassword(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return /password/i.test(message)
+}
+
+export async function openPdf(file: File, options?: OpenPdfOptions): Promise<PdfSession> {
   if (file.size === 0) throw new Error('This file is empty.')
   if (file.size > MAX_FILE_SIZE) {
     throw new Error('This file is larger than the current 250 MB safety limit.')
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer())
-  return openPdfBytes(bytes)
+  return openPdfBytes(bytes, options)
 }
 
-export async function openPdfBytes(bytes: Uint8Array): Promise<PdfSession> {
+export async function openPdfBytes(bytes: Uint8Array, options?: OpenPdfOptions): Promise<PdfSession> {
   if (!hasPdfSignature(bytes)) {
     throw new Error('This does not appear to be a valid PDF file.')
   }
 
   try {
-    const loadingTask = getDocument(documentLoadOptions(bytes.slice()))
-    const viewer = await loadingTask.promise
-    return { bytes, viewer }
+    const { viewer, openPassword } = await loadViewer(bytes, options)
+    return { bytes, viewer, openPassword }
   } catch (error) {
+    if (error instanceof Error && error.message === 'Password entry was cancelled.') {
+      throw error
+    }
     const message = error instanceof Error ? error.message : ''
     if (/password/i.test(message)) {
-      throw new Error('Password-protected PDFs are not supported yet.', {
-        cause: error,
-      })
+      throw new Error('This PDF requires a password.', { cause: error })
     }
     throw new Error(
-      'This PDF could not be opened. It may be damaged or unsupported.',
+      'This PDF could not be opened. It may be damaged, password-protected, or unsupported.',
       { cause: error },
     )
   }

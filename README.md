@@ -64,7 +64,7 @@ For a custom domain hosted at its root, build with `BASE_PATH=/` instead.
 
 ## Known scope boundary
 
-The current export engine does not rewrite original PDF content streams. Analysed text can be edited by covering the original line visually; the source glyphs remain until a later secure-redaction mode. Password decryption is not supported.
+The current export engine does not rewrite original PDF content streams. Analysed text can be edited by covering the original line visually; the source glyphs remain until a later secure-redaction mode. Password-protected PDFs can be opened with the user password for this session; exported files are not re-encrypted unless you add that in a later release.
 
 ## License
 

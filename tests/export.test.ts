@@ -47,6 +47,20 @@ describe('exportPdf', () => {
       expect(output.getPage(0).node.Resources()?.toString()).toContain('/XObject')
     }
   })
+  it('exports password-protected source PDFs opened with a password this session', async () => {
+    const encrypted = new Uint8Array(readFileSync('tests/fixtures/locked.pdf'))
+    const document = createEditorDocument('locked.pdf', encrypted.length, 1, 'locked')
+    const passwords = new Map([['locked', 'test-secret']])
+    const bytes = await exportPdf(
+      new Map([['locked', encrypted]]),
+      document,
+      fontBytes,
+      passwords,
+    )
+    const output = await PDFDocument.load(bytes)
+    expect(output.getPageCount()).toBe(1)
+  })
+
   it('exports the authoritative page order, deletions, and rotation deltas', async () => {
     const sourceBytes = await createSourcePdf()
     const document = createEditorDocument('fixture.pdf', sourceBytes.length, 3, 'export')

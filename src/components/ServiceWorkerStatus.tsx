@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 export function ServiceWorkerStatus() {
@@ -10,6 +11,19 @@ export function ServiceWorkerStatus() {
       registration?.update()
     },
   })
+
+  useEffect(() => {
+    const checkForUpdates = () => {
+      if (document.visibilityState !== 'visible') return
+      void navigator.serviceWorker?.ready.then((registration) => registration.update())
+    }
+    document.addEventListener('visibilitychange', checkForUpdates)
+    window.addEventListener('focus', checkForUpdates)
+    return () => {
+      document.removeEventListener('visibilitychange', checkForUpdates)
+      window.removeEventListener('focus', checkForUpdates)
+    }
+  }, [])
 
   if (!offlineReady && !needRefresh) return null
 

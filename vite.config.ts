@@ -257,7 +257,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        cacheId: 'pdfe-pages-v3',
+        cacheId: 'pdfe-pages-v4',
         globPatterns: [
           '**/*.{html,js,css,svg,mjs,wasm,woff,woff2,bcmap,pfb,ttf,otf,icc,gz}',
         ],
@@ -273,7 +273,7 @@ export default defineConfig({
             urlPattern: new RegExp(`${escapedBase}ocr/`, 'i'),
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'ocr-engine-v5',
+              cacheName: 'ocr-engine-v6',
               networkTimeoutSeconds: 60,
               expiration: {
                 maxEntries: 16,

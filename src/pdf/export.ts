@@ -76,17 +76,32 @@ export async function exportPdf(
   sourceBytes: ReadonlyMap<string, Uint8Array>,
   document: EditorDocument,
   fontBytes?: Uint8Array,
+  sourcePasswords?: ReadonlyMap<string, string>,
 ): Promise<Uint8Array> {
-  const { PDFDocument, degrees, rgb, LineCapStyle } = await import('pdf-lib')
+  const { PDFDocument, EncryptedPDFError, degrees, rgb, LineCapStyle } = await import('pdf-lib')
   const sourceDocuments = new Map<string, PdfLibDocument>()
 
   for (const source of document.sources) {
     const bytes = sourceBytes.get(source.id)
     if (!bytes) throw new Error(`Source file is unavailable: ${source.name}`)
-    sourceDocuments.set(
-      source.id,
-      await PDFDocument.load(bytes.slice(), { updateMetadata: false }),
-    )
+    const wasPasswordProtected = Boolean(sourcePasswords?.get(source.id))
+    try {
+      sourceDocuments.set(
+        source.id,
+        await PDFDocument.load(bytes.slice(), {
+          updateMetadata: false,
+          ignoreEncryption: wasPasswordProtected,
+        }),
+      )
+    } catch (error) {
+      if (error instanceof EncryptedPDFError) {
+        throw new Error(
+          'This PDF is password-protected. Reopen it and enter the password before exporting.',
+          { cause: error },
+        )
+      }
+      throw error
+    }
   }
 
   const output = await PDFDocument.create()
@@ -134,6 +149,7 @@ export async function exportPdf(
           pageReference.sourcePageIndex,
           pageReference.rotationDelta,
           pageReference.overlays,
+          sourcePasswords?.get(pageReference.sourceDocumentId),
         )
         if (jpegBytes) {
           const jpeg = await output.embedJpg(jpegBytes)
