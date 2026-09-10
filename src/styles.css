@@ -867,9 +867,42 @@ input:focus-visible,
   pointer-events: none;
 }
 
-.annotation-layer.is-interactive:not(.tool-select):not(.tool-eraser):not(.tool-highlight):not(.tool-underline):not(.tool-strikeout) .annotation:not(.annotation-extracted) {
+.annotation-layer.is-interactive.tool-redaction {
+  cursor: crosshair;
+}
+
+.annotation-layer.is-interactive.tool-redaction .annotation {
+  pointer-events: none;
+}
+
+.annotation-layer.is-interactive.tool-redaction .annotation.is-draft {
+  pointer-events: none;
+}
+
+.annotation-layer.is-interactive.tool-redaction .annotation-extracted:not(.is-edited) {
+  outline-color: transparent;
+}
+
+.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction).is-selected,
+.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction).is-hovered {
+  z-index: 1;
+}
+
+.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-resize-handle,
+.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-selection-frame,
+.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-selection-edge,
+.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) .annotation-hover-edge {
+  display: none;
+}
+
+.annotation-layer.is-interactive:not(.tool-select):not(.tool-eraser):not(.tool-highlight):not(.tool-underline):not(.tool-strikeout):not(.tool-redaction) .annotation:not(.annotation-extracted) {
   pointer-events: auto;
   cursor: move;
+}
+
+.annotation-layer.is-interactive.tool-redaction .annotation:not(.annotation-redaction) {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .annotation.is-selected {
@@ -1003,8 +1036,23 @@ input:focus-visible,
 }
 
 .annotation-redaction {
+  z-index: 5;
   outline: 1px dashed rgba(216, 107, 97, 0.72);
   background: transparent;
+}
+
+.annotation-redaction.is-selected {
+  z-index: 6;
+  outline: 2px solid rgba(216, 107, 97, 0.88);
+}
+
+.annotation-redaction.is-hovered {
+  z-index: 6;
+  outline: 2px dashed rgba(216, 107, 97, 0.82);
+}
+
+.annotation.is-draft.annotation-redaction {
+  z-index: 7;
 }
 
 .annotation-redaction-fill {

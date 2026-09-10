@@ -123,6 +123,7 @@ function isLineMarkTool(tool: AnnotationTool) {
 }
 
 function overlayCanStartMove(tool: AnnotationTool, overlay: PageOverlay) {
+  if (tool === 'redaction') return false
   if (tool === 'eraser') return !(overlay.extracted && !overlay.edited)
   if (isLineMarkTool(tool) && overlay.extracted) return false
   return toolCanGrabMarks(tool)
@@ -611,22 +612,7 @@ function OverlayContent({
     )
   }
   if (overlay.type === 'redaction') {
-    return (
-      <>
-        <span className="annotation-redaction-fill" aria-hidden="true" />
-        {emphasis !== 'none' ? (
-          <svg className="annotation-selection-frame" viewBox="0 0 1 1" preserveAspectRatio="none">
-            <rect
-              x="0.01"
-              y="0.01"
-              width="0.98"
-              height="0.98"
-              className={emphasis === 'selected' ? 'annotation-selection-box' : 'annotation-hover-edge'}
-            />
-          </svg>
-        ) : null}
-      </>
-    )
+    return <span className="annotation-redaction-fill" aria-hidden="true" />
   }
   if (overlay.type === 'rectangle' || overlay.type === 'ellipse' || overlay.type === 'diamond') {
     return (
@@ -914,12 +900,29 @@ function OverlayItem({
     editing && editPreview
       ? { ...visible, width: editPreview.width, height: editPreview.height }
       : visible
-  const emphasis: ShapeEmphasis = selected ? 'selected' : hovered ? 'hover' : 'none'
-  const showHandles = selected && interactive && !editing && tool !== 'eraser'
+  const appearsSelected = selected && !(tool === 'redaction' && overlay.type !== 'redaction')
+  const emphasis: ShapeEmphasis =
+    tool === 'redaction' && overlay.type !== 'redaction'
+      ? 'none'
+      : appearsSelected
+        ? 'selected'
+        : hovered && tool !== 'redaction'
+          ? 'hover'
+          : 'none'
+  const showHandles =
+    appearsSelected &&
+    interactive &&
+    !editing &&
+    tool !== 'eraser' &&
+    (tool === 'redaction'
+      ? false
+      : overlay.type === 'redaction'
+        ? tool === 'select'
+        : true)
   return (
     <div
       data-overlay-id={overlay.id}
-      className={`annotation annotation-${overlay.type} ${selected ? 'is-selected' : ''} ${hovered ? 'is-hovered' : ''} ${searchMatch ? 'is-search-match' : ''} ${searchActive ? 'is-search-active' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
+      className={`annotation annotation-${overlay.type} ${appearsSelected ? 'is-selected' : ''} ${hovered && tool !== 'redaction' ? 'is-hovered' : ''} ${searchMatch ? 'is-search-match' : ''} ${searchActive ? 'is-search-active' : ''} ${isLinearOverlay(overlay.type) ? 'is-linear' : ''} ${overlay.extracted ? 'annotation-extracted' : ''} ${overlay.scanned ? 'annotation-scanned' : ''} ${overlay.edited ? 'is-edited' : ''} ${editing ? 'is-editing' : ''} ${overlay.extracted && overlayAtPageMargin(sized) ? 'is-at-margin' : ''}`}
       style={overlayStyle(sized, renderScale, editing, editing ? editAppearance : null)}
       role={interactive && !editing ? 'button' : undefined}
       tabIndex={interactive && !editing ? 0 : undefined}
@@ -1140,6 +1143,14 @@ export function AnnotationLayer({
   }
 
   const overlayFromSession = (session: CreateSession, end: PagePoint, shift: boolean) => {
+    if (tool === 'redaction' || session.tool === 'redaction') {
+      return createDrawnOverlay('redaction', session.start, end, '#000000', {
+        shift,
+        pageAspect: pageAspect(),
+        id: session.id,
+        strokeWidth: 0,
+      })
+    }
     return createDrawnOverlay(session.tool, session.start, end, color, {
       shift,
       pageAspect: pageAspect(),
@@ -1250,6 +1261,7 @@ export function AnnotationLayer({
     if (
       !interactive ||
       tool === 'eraser' ||
+      tool === 'redaction' ||
       gestureRef.current ||
       createRef.current ||
       inkRef.current ||
@@ -1343,18 +1355,19 @@ export function AnnotationLayer({
       (end.x - session.start.x) * size.width,
       (end.y - session.start.y) * size.height,
     )
+    const creatingRedaction = tool === 'redaction' || session.tool === 'redaction'
     const overlay =
       distance < CLICK_DRAG_THRESHOLD_PX
         ? createDefaultOverlay(
-            session.tool,
+            creatingRedaction ? 'redaction' : session.tool,
             session.start.x,
             session.start.y,
-            color,
+            creatingRedaction ? '#000000' : color,
             {
               id: session.id,
               sketchSeed: session.sketchSeed,
-              strokeWidth,
-              fill: fill && isClosedDrawShape(session.tool),
+              strokeWidth: creatingRedaction ? 0 : strokeWidth,
+              fill: creatingRedaction ? false : fill && isClosedDrawShape(session.tool),
             },
           )
         : overlayFromSession(session, end, event.shiftKey)
@@ -1574,7 +1587,7 @@ export function AnnotationLayer({
           return
         }
         if (!DRAW_TOOLS.has(tool)) return
-        if (!onLayer) return
+        if (!onLayer && tool !== 'redaction') return
         createRef.current = {
           pointerId: event.pointerId,
           tool: tool as CreateSession['tool'],
@@ -1686,7 +1699,21 @@ export function AnnotationLayer({
           />
         )
       })}
-      {createDraft && (
+      {createDraft && (tool === 'redaction' || createDraft.type === 'redaction') && (
+        <div
+          className="annotation annotation-redaction is-draft"
+          style={{
+            left: `${createDraft.x * 100}%`,
+            top: `${createDraft.y * 100}%`,
+            width: `${createDraft.width * 100}%`,
+            height: `${createDraft.height * 100}%`,
+            boxSizing: 'border-box',
+          }}
+        >
+          <span className="annotation-redaction-fill" aria-hidden="true" />
+        </div>
+      )}
+      {createDraft && tool !== 'redaction' && createDraft.type !== 'redaction' && (
         <div className={`annotation annotation-${createDraft.type} is-draft`} style={overlayStyle(createDraft, renderScale)}>
           <OverlayContent
             overlay={createDraft}

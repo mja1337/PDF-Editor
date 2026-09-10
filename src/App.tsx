@@ -1109,7 +1109,11 @@ export function App() {
     (overlay: PageOverlay) => {
       if (!selectedPage) return
       dispatch({ type: 'addOverlay', pageId: selectedPage.id, overlay })
-      setSelectedOverlayId(overlay.id)
+      if (overlay.type === 'redaction') {
+        setSelectedOverlayId(null)
+      } else {
+        setSelectedOverlayId(overlay.id)
+      }
       if (overlay.type === 'text' || overlay.signature) setAnnotationTool('select')
     },
     [selectedPage],
@@ -1132,6 +1136,7 @@ export function App() {
   const chooseAnnotationTool = useCallback(
     (tool: AnnotationTool) => {
       setAnnotationTool(tool)
+      if (tool === 'redaction') setSelectedOverlayId(null)
       const remembered = toolWeights[tool]
       if (remembered != null) setInkWidth(remembered)
     },
