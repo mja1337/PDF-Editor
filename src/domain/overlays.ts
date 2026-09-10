@@ -63,12 +63,19 @@ export function createDefaultOverlay(
     diamond: { width: 0.2, height: 0.16 },
     ink: { width: 0.3, height: 0.15 },
     image: { width: 0.3, height: 0.15 },
+    redaction: { width: 0.34, height: 0.06 },
   }
   const size = sizes[type]
-  const sketch = SKETCH_TYPES.has(type)
+  const isRedaction = type === 'redaction'
+  const sketch = !isRedaction && SKETCH_TYPES.has(type)
   const seed = sketch ? (options?.sketchSeed ?? sketchSeed()) : options?.sketchSeed
   const isText = type === 'text'
-  const fill = options?.fill && isClosedDrawShape(type) ? color : undefined
+  const fill =
+    isRedaction
+      ? '#000000'
+      : options?.fill && isClosedDrawShape(type)
+        ? color
+        : undefined
   return normalizeOverlay({
     id: options?.id ?? crypto.randomUUID(),
     type,
@@ -76,9 +83,9 @@ export function createDefaultOverlay(
     y: y - size.height / 2,
     width: size.width,
     height: size.height,
-    color: isText ? '#111111' : color,
-    opacity: type === 'highlight' ? 0.42 : 0.95,
-    strokeWidth: options?.strokeWidth ?? (sketch ? 1.25 : 2),
+    color: isRedaction ? '#000000' : isText ? '#111111' : color,
+    opacity: isRedaction ? 1 : type === 'highlight' ? 0.42 : 0.95,
+    strokeWidth: isRedaction ? 0 : options?.strokeWidth ?? (sketch ? 1.25 : 2),
     backgroundColor: fill,
     text: isText ? 'Add text' : undefined,
     fontSize: isText ? 22 : undefined,

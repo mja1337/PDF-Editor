@@ -15,6 +15,7 @@ import {
   Diamond,
   Download,
   Eraser,
+  EyeOff,
   FilePlus2,
   FileText,
   Files,
@@ -94,6 +95,12 @@ import type { OcrConsent, SavedSignature } from './domain/preferences'
 import { platformOcrAvailable } from './pdf/ocr'
 import { openPdf, openPdfBytes, renderPageToPng, type PdfSession } from './pdf/engine'
 import { downloadBlob, downloadPdf, exportPdf } from './pdf/export'
+import {
+  documentHasRedactions,
+  downloadRedactedPdf,
+  exportRedactedPdf,
+  redactionCount,
+} from './pdf/redact'
 import type { OutlineEntry, SearchResult } from './pdf/navigation'
 import {
   MAX_ZOOM,
@@ -152,6 +159,7 @@ const ANNOTATE_PALETTE: Array<
   { id: 'line', label: 'Line', icon: Slash },
   { id: 'arrow', label: 'Arrow', icon: ArrowUpRight },
   { id: 'diamond', label: 'Diamond', icon: Diamond },
+  { id: 'redaction', label: 'Redact', icon: EyeOff },
 ]
 
 const ANNOTATE_COLOURS = [
@@ -214,6 +222,9 @@ function annotationHint(tool: AnnotationTool, hasExtracted: boolean) {
   }
   if (tool === 'rectangle' || tool === 'ellipse' || tool === 'diamond') {
     return 'Drag empty space to size. Click a mark to move it. Shift constrains. Escape returns to Select.'
+  }
+  if (tool === 'redaction') {
+    return 'Drag over text or areas to mark for removal. Use Export redacted PDF to permanently remove hidden content from affected pages.'
   }
   return 'Click the page to place the annotation.'
 }
@@ -346,6 +357,7 @@ export function App() {
     | 'extracting'
     | 'rendering'
     | 'analysing'
+    | 'redacting'
     | null
   >(null)
   const [error, setError] = useState<string | null>(null)
@@ -496,6 +508,18 @@ export function App() {
   const selectedOverlay =
     selectedPage?.overlays.find((overlay) => overlay.id === selectedOverlayId) ??
     null
+  const totalRedactions = useMemo(
+    () => (editorDocument ? redactionCount(editorDocument) : 0),
+    [editorDocument],
+  )
+  const pagesWithRedactions = useMemo(
+    () =>
+      editorDocument?.pages.filter((page) =>
+        page.overlays.some((overlay) => overlay.type === 'redaction'),
+      ).length ?? 0,
+    [editorDocument],
+  )
+  const hasRedactions = totalRedactions > 0
 
   const handlePreviewSize = useCallback((size: { width: number }) => {
     setPreviewWidth(size.width)
@@ -822,6 +846,39 @@ export function App() {
       downloadPdf(bytes, editorDocument.name)
     } catch (cause) {
       setError(userFacingError(cause, 'The edited PDF could not be exported. Your source file is unchanged.'))
+    } finally {
+      setBusy(null)
+    }
+  }, [busy, editorDocument, sessions, sourceBytes, sourcePasswords])
+
+  const saveRedactedDocument = useCallback(async () => {
+    if (!editorDocument || sessions.size === 0 || busy || !documentHasRedactions(editorDocument)) {
+      return
+    }
+    const affectedPages = editorDocument.pages.filter((page) =>
+      page.overlays.some((overlay) => overlay.type === 'redaction'),
+    ).length
+    const confirmed = window.confirm(
+      `Secure redaction export will turn ${affectedPages} page${affectedPages === 1 ? '' : 's'} into images so text under the black marks cannot be copied or searched. Those pages lose live text, links, and forms. Other pages stay as normal PDF content. Continue?`,
+    )
+    if (!confirmed) return
+    setBusy('redacting')
+    setError(null)
+    try {
+      const bytes = await exportRedactedPdf(
+        sourceBytes(),
+        editorDocument,
+        undefined,
+        sourcePasswords(),
+      )
+      downloadRedactedPdf(bytes, editorDocument.name)
+    } catch (cause) {
+      setError(
+        userFacingError(
+          cause,
+          'The redacted PDF could not be exported. Your source file is unchanged.',
+        ),
+      )
     } finally {
       setBusy(null)
     }
@@ -1769,6 +1826,24 @@ export function App() {
             )}
             Export PDF
           </button>
+          <button
+            type="button"
+            className="export-button export-button-redacted"
+            disabled={!editorDocument || !hasRedactions || busy !== null}
+            title={
+              hasRedactions
+                ? 'Rasterize pages with redaction marks so hidden text cannot be copied'
+                : 'Add redaction marks before exporting securely'
+            }
+            onClick={() => void saveRedactedDocument()}
+          >
+            {busy === 'redacting' ? (
+              <LoaderCircle className="spin" size={17} />
+            ) : (
+              <EyeOff size={17} />
+            )}
+            Export redacted
+          </button>
         </div>
       </header>
 
@@ -2374,6 +2449,38 @@ export function App() {
               )}
             </section>
 
+            <section className="tool-section redaction-tools">
+              <h3>Redaction</h3>
+              <p className="tool-hint">
+                {totalRedactions === 0
+                  ? 'Choose Redact above, then drag over sensitive text or areas. Export PDF only covers visually; Export redacted permanently removes hidden text on marked pages.'
+                  : `${totalRedactions} mark${totalRedactions === 1 ? '' : 's'} on ${pagesWithRedactions} page${pagesWithRedactions === 1 ? '' : 's'}. Use Export redacted in the toolbar to secure them.`}
+              </p>
+              {selectedPage &&
+                selectedPage.overlays.some((overlay) => overlay.type === 'redaction') && (
+                  <ul className="extracted-text-list redaction-mark-list">
+                    {selectedPage.overlays
+                      .filter((overlay) => overlay.type === 'redaction')
+                      .map((overlay, index) => (
+                        <li key={overlay.id}>
+                          <button
+                            type="button"
+                            className={`extracted-text-item${
+                              selectedOverlayId === overlay.id ? ' is-active' : ''
+                            }`}
+                            onClick={() => {
+                              setAnnotationTool('select')
+                              setSelectedOverlayId(overlay.id)
+                            }}
+                          >
+                            Mark {index + 1}
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+            </section>
+
             {selectedOverlay && (
               <section className="tool-section annotation-properties">
                 <h3>Selected {selectedOverlay.type}</h3>
@@ -2397,6 +2504,13 @@ export function App() {
                       : 'Click the line on the page and type. Extra text grows toward the page margin, then wraps onto a new line.'}
                   </p>
                 )}
+                {selectedOverlay.type === 'redaction' && (
+                  <p className="tool-hint">
+                    Preview only. Export redacted PDF rasterizes this page so content under the mark cannot be copied or searched.
+                  </p>
+                )}
+                {selectedOverlay.type !== 'redaction' && (
+                <>
                 <label className="color-control">
                   <span>Colour</span>
                   <input
@@ -2506,6 +2620,8 @@ export function App() {
                       </button>
                     </div>
                   </div>
+                )}
+                </>
                 )}
                 <div className="annotation-actions">
                   <button type="button" onClick={copySelectedOverlay}>
@@ -2641,20 +2757,6 @@ export function App() {
                     </button>
                   ))}
                 </div>
-                <label className="watermark-opacity-slider">
-                  <span>Fine tune · {Math.round(watermarkFields.opacity * 100)}%</span>
-                  <input
-                    type="range"
-                    min={10}
-                    max={50}
-                    value={Math.round(watermarkFields.opacity * 100)}
-                    onChange={(event) =>
-                      updateWatermarkDraft({
-                        opacity: Number(event.currentTarget.value) / 100,
-                      })
-                    }
-                  />
-                </label>
               </div>
               <div className="property-row">
                 <span>Angle</span>

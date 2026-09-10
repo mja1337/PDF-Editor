@@ -204,6 +204,16 @@ input:focus-visible,
   font-size: 0.79rem;
 }
 
+.export-button-redacted {
+  color: #f3ecea;
+  background: #5a3530;
+  box-shadow: 0 5px 16px rgba(90, 53, 48, 0.22);
+}
+
+.export-button-redacted:hover:not(:disabled) {
+  background: #6b4039;
+}
+
 .export-button:hover:not(:disabled),
 .primary-open-button:hover:not(:disabled) {
   background: #48c7b5;
@@ -992,6 +1002,20 @@ input:focus-visible,
   border-top-width: inherit;
 }
 
+.annotation-redaction {
+  outline: 1px dashed rgba(216, 107, 97, 0.72);
+  background: transparent;
+}
+
+.annotation-redaction-fill {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: #000;
+  border-radius: 2px;
+  opacity: 0.94;
+}
+
 .annotation-rectangle,
 .annotation-ellipse {
   border-style: none;
@@ -1444,17 +1468,6 @@ input:focus-visible,
   gap: 6px;
   color: #8fa099;
   font-size: 0.68rem;
-}
-
-.watermark-opacity-slider {
-  display: grid;
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.watermark-opacity-slider input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
 }
 
 .watermark-tools input::placeholder {

@@ -375,6 +375,12 @@ export async function exportPdf(
           color,
           opacity: overlay.opacity,
         })
+      } else if (overlay.type === 'redaction') {
+        page.drawRectangle({
+          ...rect,
+          color: rgb(0, 0, 0),
+          opacity: 1,
+        })
       } else if (overlay.type === 'rectangle') {
         const fillHex = closedShapeFill(overlay)
         const fillColor = fillHex

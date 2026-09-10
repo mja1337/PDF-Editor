@@ -12,6 +12,7 @@ export type OverlayType =
   | 'diamond'
   | 'ink'
   | 'image'
+  | 'redaction'
 
 export type WordArtStyle = 'plain' | 'outline' | 'shadow' | 'arch' | 'stack'
 

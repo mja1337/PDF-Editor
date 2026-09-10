@@ -111,6 +111,7 @@ const DRAW_TOOLS = new Set<AnnotationTool>([
   'line',
   'arrow',
   'diamond',
+  'redaction',
 ])
 
 function toolCanGrabMarks(tool: AnnotationTool) {
@@ -607,6 +608,24 @@ function OverlayContent({
         renderScale={renderScale}
         emphasis={emphasis}
       />
+    )
+  }
+  if (overlay.type === 'redaction') {
+    return (
+      <>
+        <span className="annotation-redaction-fill" aria-hidden="true" />
+        {emphasis !== 'none' ? (
+          <svg className="annotation-selection-frame" viewBox="0 0 1 1" preserveAspectRatio="none">
+            <rect
+              x="0.01"
+              y="0.01"
+              width="0.98"
+              height="0.98"
+              className={emphasis === 'selected' ? 'annotation-selection-box' : 'annotation-hover-edge'}
+            />
+          </svg>
+        ) : null}
+      </>
     )
   }
   if (overlay.type === 'rectangle' || overlay.type === 'ellipse' || overlay.type === 'diamond') {

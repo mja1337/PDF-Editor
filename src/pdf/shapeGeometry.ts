@@ -17,6 +17,7 @@ const BOX_SHAPE_TYPES = new Set<OverlayType>([
   'underline',
   'strikeout',
   'image',
+  'redaction',
 ])
 
 export function isLinearOverlay(type: OverlayType): type is 'line' | 'arrow' {
@@ -146,7 +147,7 @@ export function constrainDrag(
 ) {
   if (!shift) return clampPoint(end)
   if (isLinearOverlay(type)) return snapAngle(start, end)
-  if (type === 'rectangle' || type === 'ellipse' || type === 'diamond') {
+  if (type === 'rectangle' || type === 'ellipse' || type === 'diamond' || type === 'redaction') {
     return snapSquare(start, end, pageAspect)
   }
   return clampPoint(end)
