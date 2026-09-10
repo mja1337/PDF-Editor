@@ -79,6 +79,13 @@ positions rescaled to the run's real width so the matched font's metrics cannot
 drift onto the wrong glyphs. If a renderer paints a whole line in `overlay.color`,
 coloured marks are lost.
 
+**Overflow is offered a way out.** When a replacement cannot fit even at the
+smallest size, the analysed list shows "Make room", which dispatches
+`makeRoom`: the line gains the height it needs and the rest of its column
+moves down by the same amount, in one history entry. The refit effect is
+memoised on the line's text, so an action that changes the space around a
+line rather than its text has to clear `overflow` itself.
+
 **The box always fits its text.** An effect in `AnnotationLayer` refits any edited
 analysed line whose text changed, whatever changed it — the on-page editor, the
 sidebar list, paste, undo. Add new edit paths without worrying about sizing; do not

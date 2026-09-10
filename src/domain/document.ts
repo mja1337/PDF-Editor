@@ -57,6 +57,8 @@ export interface PageOverlay {
   source?: { width: number; height: number; fontSize: number }
   /** Set when a replacement will not fit even at the smallest allowed size. */
   overflow?: boolean
+  /** Extra height such a replacement needs, so the block can be given room. */
+  overflowBy?: number
   /** Per-character ink, so a coloured mark inside a line survives an edit. */
   colorSegments?: ColorSegment[]
 }
@@ -120,6 +122,14 @@ export type DocumentAction =
       changes: Partial<PageOverlay>
     }
   | { type: 'deleteOverlay'; pageId: string; overlayId: string }
+  | {
+      /** Gives an overflowing line `dy` more height and pushes its column down. */
+      type: 'makeRoom'
+      pageId: string
+      overlayId: string
+      belowIds: string[]
+      dy: number
+    }
   | {
       type: 'duplicateOverlay'
       pageId: string
@@ -375,6 +385,33 @@ export function documentReducer(
             : page,
         ),
       }))
+
+    case 'makeRoom': {
+      const moving = new Set(action.belowIds)
+      if (action.dy <= 0) return history
+      return commit(history, (document) => ({
+        ...document,
+        pages: document.pages.map((page) =>
+          page.id === action.pageId
+            ? {
+                ...page,
+                overlays: page.overlays.map((overlay) => {
+                  if (moving.has(overlay.id)) {
+                    return normalizeOverlay({ ...overlay, y: overlay.y + action.dy })
+                  }
+                  if (overlay.id !== action.overlayId) return overlay
+                  return normalizeOverlay({
+                    ...overlay,
+                    height: overlay.height + action.dy,
+                    overflow: false,
+                    overflowBy: undefined,
+                  })
+                }),
+              }
+            : page,
+        ),
+      }))
+    }
 
     case 'deleteOverlay':
       return commit(history, (document) => {

@@ -66,13 +66,32 @@ describe('extractedFitBounds', () => {
     expect(bounds.maxBottom).toBeLessThan(subject.y + subject.height)
   })
 
-  it('ignores annotations and lines that do not share a row or column', () => {
+  it('ignores annotations entirely', () => {
     const subject = line({ id: 'a' })
     const bounds = extractedFitBounds(subject, [
       line({ id: 'shape', type: 'rectangle', extracted: false, x: 0.5, y: 0.105 }),
-      line({ id: 'far', x: 0.5, y: 0.6 }),
+      line({ id: 'below-shape', type: 'ellipse', extracted: false, x: 0.1, y: 0.5 }),
     ])
     expect(bounds.maxRight).toBeCloseTo(0.97, 5)
+    expect(bounds.maxBottom).toBeCloseTo(0.97, 5)
+  })
+
+  it('accounts for a lower line the growth would end up sitting above', () => {
+    // Nothing blocks growth to the right, so the line can reach 0.97 -- which
+    // puts it over a line further down the page that starts at x 0.5.
+    const subject = line({ id: 'a' })
+    const bounds = extractedFitBounds(subject, [line({ id: 'lower-right', x: 0.5, y: 0.6 })])
+    expect(bounds.maxRight).toBeCloseTo(0.97, 5)
+    expect(bounds.maxBottom).toBeCloseTo(0.596, 5)
+  })
+
+  it('leaves a lower line alone when growth cannot reach it', () => {
+    const subject = line({ id: 'a' })
+    const bounds = extractedFitBounds(subject, [
+      line({ id: 'blocker', x: 0.45, y: 0.105 }),
+      line({ id: 'lower-right', x: 0.6, y: 0.6, width: 0.2 }),
+    ])
+    expect(bounds.maxRight).toBeCloseTo(0.446, 5)
     expect(bounds.maxBottom).toBeCloseTo(0.97, 5)
   })
 })

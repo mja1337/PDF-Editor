@@ -900,3 +900,97 @@ test('keeps a tightly leaded block from overlapping, before and after editing', 
   const after = (await page.locator('.focused-page .annotation-extracted').nth(3)).boundingBox()
   expect((await after)!.y).toBeCloseTo(before.y, 0)
 })
+
+test('fits an edit between a second column and the row below, or offers room', async ({
+  page,
+}) => {
+  test.setTimeout(60_000)
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const sheet = pdf.addPage([595, 842])
+  const rows = ['Mr Jonathan Doe', 'Kingsmead House', '27 Riverside Walk', 'London']
+  rows.forEach((value, index) => {
+    sheet.drawText(value, { x: 60, y: 740 - index * 14, size: 12, font })
+    // A second column pins how far the left column can grow.
+    sheet.drawText(`Ref 00${index}`, { x: 260, y: 740 - index * 14, size: 12, font })
+  })
+
+  await page.goto('./')
+  await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
+    name: 'columns.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await pdf.save()),
+  })
+  await expect(page.locator('.focused-page .pdf-canvas-wrap')).toHaveAttribute(
+    'data-status',
+    'ready',
+  )
+  await page.getByRole('button', { name: 'Analyse text' }).click()
+  await expect(page.getByText(/lines? found/i)).toBeVisible()
+
+  const fields = page.locator('.text-panel .extracted-text-row textarea')
+  const values = await fields.evaluateAll((nodes) =>
+    nodes.map((node) => (node as HTMLTextAreaElement).value),
+  )
+  const target = values.findIndex((value) => value.includes('Kingsmead'))
+  expect(target, JSON.stringify(values)).toBeGreaterThanOrEqual(0)
+
+  const boxes = () =>
+    page.locator('.focused-page').evaluate((root) =>
+      [...root.querySelectorAll('.annotation-extracted')].map((node) => {
+        const rect = node.getBoundingClientRect()
+        return {
+          text: (node.textContent ?? '').trim(),
+          x: rect.x,
+          y: rect.y,
+          right: rect.right,
+          bottom: rect.bottom,
+        }
+      }),
+    )
+  const collisions = (all: Awaited<ReturnType<typeof boxes>>) =>
+    all.filter((a, i) =>
+      all.some(
+        (b, j) =>
+          i !== j &&
+          b.x < a.right - 0.5 &&
+          b.right > a.x + 0.5 &&
+          b.y < a.bottom - 0.5 &&
+          b.bottom > a.y + 0.5,
+      ),
+    ).length
+
+  expect(collisions(await boxes())).toBe(0)
+
+  await fields.nth(target).fill(
+    'Kingsmead House, Apartment 12b, Riverside Walk, Battersea, Greater London',
+  )
+  await fields.nth(target).press('Tab')
+  await expect(page.locator('.focused-page .annotation-extracted').nth(target)).toContainText(
+    'Battersea',
+  )
+  expect(collisions(await boxes()), 'edit must not collide with the block').toBe(0)
+
+  // This replacement cannot fit between the second column and the row below,
+  // so it must say so rather than spill, and offer to make the room.
+  const row = page.locator('.text-panel .extracted-text-row').nth(target)
+  await expect(row).toHaveClass(/is-overflowing/)
+  {
+    const start = await boxes()
+    const edited = start.find((box) => box.text.includes('Battersea'))!
+    const columnBelow = (all: typeof start) =>
+      all.filter((box) => box.y > edited.y + 1 && box.x < edited.right && box.right > edited.x)
+    expect(columnBelow(start).length).toBeGreaterThan(0)
+
+    await row.getByRole('button', { name: 'Make room' }).click()
+    await expect(row).not.toHaveClass(/is-overflowing/)
+
+    const end = await boxes()
+    // Its own column moved down to make the space, and nothing collides after.
+    for (const box of columnBelow(end)) {
+      const was = start.find((other) => other.text === box.text)!
+      expect(box.y).toBeGreaterThan(was.y)
+    }
+    expect(collisions(end), 'making room must not create a collision').toBe(0)
+  }
+})

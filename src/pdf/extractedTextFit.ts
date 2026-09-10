@@ -33,6 +33,8 @@ export interface ExtractedFit {
   fontSize: number
   lines: string[]
   overflow: boolean
+  /** Height the text actually needs, so the caller can offer to make room. */
+  neededHeight: number
 }
 
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
@@ -61,23 +63,32 @@ export function extractedFitBounds(
   overlay: FitBox & { id?: string },
   neighbours: ReadonlyArray<PageOverlay>,
 ): FitBounds {
-  const right = overlay.x + overlay.width
   const centre = overlay.y + overlay.height / 2
+  const lines = neighbours.filter(
+    (other) => other.extracted && other.id !== overlay.id,
+  )
+
+  // Order by centre, not by box edges: analysed boxes from tight leading can
+  // overlap, and edge tests then fail to see the neighbour at all.
   let maxRight = 1 - PAGE_EDGE_MARGIN
-  let maxBottom = 1 - PAGE_EDGE_MARGIN
-  for (const other of neighbours) {
-    if (!other.extracted || other.id === overlay.id) continue
-    // Order by centre, not by box edges: analysed boxes from tight leading can
-    // overlap, and edge tests then fail to see the neighbour at all.
+  for (const other of lines) {
     const otherCentre = other.y + other.height / 2
     const sameRow =
       Math.abs(otherCentre - centre) < Math.max(overlay.height, other.height) * 0.5
     if (sameRow && other.x > overlay.x) {
       maxRight = Math.min(maxRight, other.x - NEIGHBOUR_GAP)
     }
+  }
+
+  // A line only needs room below once it has already grown as far right as it
+  // can, so the span that matters is the grown one, not the measured one.
+  let maxBottom = 1 - PAGE_EDGE_MARGIN
+  const grownRight = Math.max(overlay.x + overlay.width, maxRight)
+  for (const other of lines) {
+    const otherCentre = other.y + other.height / 2
     if (
       otherCentre > centre &&
-      overlaps(overlay.x, right, other.x, other.x + other.width)
+      overlaps(overlay.x, grownRight, other.x, other.x + other.width)
     ) {
       maxBottom = Math.min(maxBottom, other.y - NEIGHBOUR_GAP)
     }
@@ -155,19 +166,20 @@ export function fitExtractedText(options: {
         fontSize,
         lines: [single],
         overflow: false,
+        neededHeight: minHeightPx / pageHeight,
       }
     }
     const lines = layoutExtractedLines(single, maxWidthPx, fontSize, measure)
     const neededPx = lines.length * fontSize * EXTRACTED_LINE_HEIGHT + pad.y * 2
     if (neededPx <= maxHeightPx) {
+      const wanted = Math.max(minHeightPx, neededPx * METRIC_HEADROOM)
       return {
         width: maxWidthPx / pageWidth,
-        height:
-          Math.min(maxHeightPx, Math.max(minHeightPx, neededPx * METRIC_HEADROOM)) /
-          pageHeight,
+        height: Math.min(maxHeightPx, wanted) / pageHeight,
         fontSize,
         lines,
         overflow: false,
+        neededHeight: wanted / pageHeight,
       }
     }
     fallback = {
@@ -176,6 +188,7 @@ export function fitExtractedText(options: {
       fontSize,
       lines,
       overflow: true,
+      neededHeight: Math.max(minHeightPx, neededPx * METRIC_HEADROOM) / pageHeight,
     }
   }
   return (
@@ -185,6 +198,7 @@ export function fitExtractedText(options: {
       fontSize: source.fontSize * MIN_FONT_SCALE,
       lines: [single],
       overflow: true,
+      neededHeight: maxHeightPx / pageHeight,
     }
   )
 }

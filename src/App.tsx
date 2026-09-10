@@ -55,6 +55,7 @@ import {
 } from 'react'
 import { ANNOTATE_COLOURS, ANNOTATE_PALETTE, STROKE_WEIGHTS, annotationHint, annotationUsesColour, annotationUsesFill, annotationUsesWeight } from './app/annotationTools'
 import { analysingLabel, formatBytes, scannedPageHint, userFacingError } from './app/messages'
+import { PAGE_EDGE_MARGIN } from './pdf/textLayout'
 import { destroySession, destroySessions } from './app/sessions'
 import { useDocumentOutline } from './app/useDocumentOutline'
 import { useDocumentSearch } from './app/useDocumentSearch'
@@ -940,6 +941,44 @@ export function App() {
     [selectedPage],
   )
 
+  /**
+   * A line that cannot fit even at the smallest size gets room by pushing the
+   * rest of its column down, rather than being left to spill or be cut off.
+   */
+  const makeRoomForOverlay = useCallback(
+    (overlayId: string) => {
+      if (!selectedPage) return
+      const overlay = selectedPage.overlays.find((item) => item.id === overlayId)
+      const dy = overlay?.overflowBy ?? 0
+      if (!overlay || dy <= 0) return
+      const centre = overlay.y + overlay.height / 2
+      const below = selectedPage.overlays.filter(
+        (other) =>
+          other.extracted &&
+          other.id !== overlayId &&
+          other.y + other.height / 2 > centre &&
+          other.x < overlay.x + overlay.width &&
+          other.x + other.width > overlay.x,
+      )
+      if (below.length === 0) {
+        setError('There is nothing below this line to move, so it cannot be given more room.')
+        return
+      }
+      if (below.some((other) => other.y + other.height + dy > 1 - PAGE_EDGE_MARGIN)) {
+        setError('Making room here would push a line off the bottom of the page.')
+        return
+      }
+      dispatch({
+        type: 'makeRoom',
+        pageId: selectedPage.id,
+        overlayId: overlayId,
+        belowIds: below.map((other) => other.id),
+        dy,
+      })
+    },
+    [selectedPage],
+  )
+
   const deleteSelectedOverlay = useCallback(() => {
     if (!selectedPage || !selectedOverlayId) return false
     dispatch({
@@ -1813,7 +1852,13 @@ export function App() {
                             {overlay.overflow && (
                               <p className="extracted-text-warning">
                                 <TriangleAlert size={13} />
-                                Too long for the space here, even at the smallest size.
+                                <span>Too long for the space here.</span>
+                                <button
+                                  type="button"
+                                  onClick={() => makeRoomForOverlay(overlay.id)}
+                                >
+                                  Make room
+                                </button>
                               </p>
                             )}
                           </div>
