@@ -62,27 +62,31 @@ export function extractedFitBounds(
   neighbours: ReadonlyArray<PageOverlay>,
 ): FitBounds {
   const right = overlay.x + overlay.width
-  const bottom = overlay.y + overlay.height
+  const centre = overlay.y + overlay.height / 2
   let maxRight = 1 - PAGE_EDGE_MARGIN
   let maxBottom = 1 - PAGE_EDGE_MARGIN
   for (const other of neighbours) {
     if (!other.extracted || other.id === overlay.id) continue
-    if (
-      other.x >= right - NEIGHBOUR_GAP &&
-      overlaps(overlay.y, bottom, other.y, other.y + other.height)
-    ) {
+    // Order by centre, not by box edges: analysed boxes from tight leading can
+    // overlap, and edge tests then fail to see the neighbour at all.
+    const otherCentre = other.y + other.height / 2
+    const sameRow =
+      Math.abs(otherCentre - centre) < Math.max(overlay.height, other.height) * 0.5
+    if (sameRow && other.x > overlay.x) {
       maxRight = Math.min(maxRight, other.x - NEIGHBOUR_GAP)
     }
     if (
-      other.y >= bottom - NEIGHBOUR_GAP &&
+      otherCentre > centre &&
       overlaps(overlay.x, right, other.x, other.x + other.width)
     ) {
       maxBottom = Math.min(maxBottom, other.y - NEIGHBOUR_GAP)
     }
   }
+  // A bound tighter than the current box means no room to grow, which is not
+  // the same as being free to grow to the page edge.
   return {
-    maxRight: Math.max(right, maxRight),
-    maxBottom: Math.max(bottom, maxBottom),
+    maxRight: Math.max(overlay.x, maxRight),
+    maxBottom: Math.max(overlay.y, maxBottom),
   }
 }
 

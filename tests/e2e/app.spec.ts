@@ -838,3 +838,65 @@ test('lines the top and bottom toolbars up on the same axis', async ({ page }) =
   expect(Math.abs(centre(tools) - centre(view))).toBeLessThan(2)
   expect(Math.abs(centre(tools) - centre(stage))).toBeLessThan(2)
 })
+
+test('keeps a tightly leaded block from overlapping, before and after editing', async ({
+  page,
+}) => {
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const sheet = pdf.addPage([595, 842])
+  // 12pt type on 14pt leading, as an address block is normally set. Run heights
+  // include ascenders and descenders, so the measured boxes overlap.
+  const rows = [
+    'Mr Jonathan Doe',
+    'Flat 4, Kingsmead House',
+    '27 Riverside Walk',
+    'London',
+    'SW1A 1AA',
+  ]
+  rows.forEach((value, index) =>
+    sheet.drawText(value, { x: 60, y: 740 - index * 14, size: 12, font }),
+  )
+
+  await page.goto('./')
+  await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
+    name: 'tight.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await pdf.save()),
+  })
+  await expect(page.locator('.focused-page .pdf-canvas-wrap')).toHaveAttribute(
+    'data-status',
+    'ready',
+  )
+  await page.getByRole('button', { name: 'Analyse text' }).click()
+  await expect(page.getByText(/lines? found/i)).toBeVisible()
+
+  const gaps = () =>
+    page.locator('.focused-page').evaluate((root) => {
+      const boxes = [...root.querySelectorAll('.annotation-extracted')]
+        .map((node) => node.getBoundingClientRect())
+        .sort((left, right) => left.top - right.top)
+      return boxes
+        .slice(1)
+        .map((box, index) => +(box.top - boxes[index].bottom).toFixed(1))
+    })
+
+  const analysed = await gaps()
+  expect(analysed).toHaveLength(rows.length - 1)
+  for (const gap of analysed) expect(gap, JSON.stringify(analysed)).toBeGreaterThanOrEqual(-0.5)
+
+  const before = (await page.locator('.focused-page .annotation-extracted').nth(3).boundingBox())!
+  const list = page.locator('.text-panel .extracted-text-row')
+  await list.nth(1).locator('textarea').fill(
+    'Flat 4, Kingsmead House, Apartment 12b, Riverside Walk, Battersea',
+  )
+  await list.nth(1).locator('textarea').press('Tab')
+  await expect(page.locator('.focused-page .annotation-extracted').nth(1)).toContainText(
+    'Battersea',
+  )
+
+  const edited = await gaps()
+  for (const gap of edited) expect(gap, JSON.stringify(edited)).toBeGreaterThanOrEqual(-0.5)
+  const after = (await page.locator('.focused-page .annotation-extracted').nth(3)).boundingBox()
+  expect((await after)!.y).toBeCloseTo(before.y, 0)
+})

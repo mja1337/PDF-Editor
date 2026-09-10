@@ -18,6 +18,33 @@ describe('scanned text edits', () => {
     expect(box.y + box.height).toBeLessThanOrEqual(1)
   })
 
+  it('never paints over the lines above or below in a tight block', () => {
+    const row = (id: string, y: number) =>
+      createExtractedOverlay({
+        text: id,
+        x: 0.1,
+        y,
+        width: 0.3,
+        height: 0.028,
+        fontSize: 12,
+        scanned: true,
+      })
+    // Measured boxes that already overlap, as analysed before pitch trimming.
+    const above = row('above', 0.1)
+    const middle = row('middle', 0.12)
+    const below = row('below', 0.14)
+    const box = coverBox(middle, [above, middle, below])
+
+    expect(box.y).toBeGreaterThanOrEqual(above.y + above.height / 2)
+    expect(box.y + box.height).toBeLessThanOrEqual(below.y + below.height / 2)
+    // It still covers the body of the line it belongs to. Clipping a measured
+    // box that overlaps its neighbours is the safer failure: leaving a glyph
+    // tip is recoverable, erasing the next line is not.
+    const centre = middle.y + middle.height / 2
+    expect(box.y).toBeLessThan(centre)
+    expect(box.y + box.height).toBeGreaterThan(centre)
+  })
+
   it('only flattens OCR replacements, not ordinary typed notes', () => {
     const scanned = createExtractedOverlay({
       text: 'TESCO STORES 3842',
