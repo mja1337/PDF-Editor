@@ -15,6 +15,7 @@ A private, local-first PDF workspace designed for GitHub Pages. Documents are op
 - Navigate by page number, keyboard, fit width, or fit page.
 - Search native PDF text plus analysed/OCR lines and text-box annotations across the document.
 - Analyse a document on demand to turn found text lines into editable boxes, with progress and cancellation. Scanned pages can use an optional on-device Tesseract OCR engine served from this GitHub Pages site after you agree.
+- Export analysed tables to an Excel workbook with each distinct table on its own worksheet. Tables with matching column headers are consolidated throughout the document, and headerless continuations can be joined across consecutive pages.
 - Browse embedded PDF bookmarks when the source file includes them (hidden for scans and most exports).
 - Add text boxes, highlights, underlines, strikeouts, rectangles, ellipses, and lines.
 - Select, move, resize, keyboard-nudge, recolour, restyle, copy, paste, duplicate, or delete annotations with undo/redo.

@@ -18,6 +18,7 @@ import {
   Droplets,
   EyeOff,
   FilePlus2,
+  FileSpreadsheet,
   FileText,
   Files,
   FolderOpen,
@@ -139,6 +140,7 @@ export function App() {
     | 'opening'
     | 'adding'
     | 'exporting'
+    | 'excel-exporting'
     | 'extracting'
     | 'rendering'
     | 'analysing'
@@ -531,6 +533,8 @@ export function App() {
         invalidateOutline()
         clearSearchResults()
         setSelectedOverlayId(null)
+        setAnalyseSummary(null)
+        setAnalyseProgress('')
       }
 
       sessionsRef.current = nextSessions
@@ -628,6 +632,8 @@ export function App() {
         invalidateOutline()
         clearSearchResults()
         setSelectedOverlayId(null)
+        setAnalyseSummary(null)
+        setAnalyseProgress('')
       }
 
       sessionsRef.current = nextSessions
@@ -731,6 +737,26 @@ export function App() {
       await saveDocument()
     }
   }, [busy, editorDocument, saveDocument, saveRedactedDocument, sessions.size])
+
+  const exportExcel = useCallback(async () => {
+    if (!editorDocument || busy || !analyseSummary) return
+    setBusy('excel-exporting')
+    setError(null)
+    try {
+      const { createExcelWorkbook, excelFileName } = await import('./pdf/excel')
+      const bytes = createExcelWorkbook(editorDocument)
+      downloadBlob(
+        new Blob([bytes], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+        excelFileName(editorDocument.name),
+      )
+    } catch (cause) {
+      setError(userFacingError(cause, 'The Excel workbook could not be created.'))
+    } finally {
+      setBusy(null)
+    }
+  }, [analyseSummary, busy, editorDocument])
 
   const extractSelected = useCallback(async () => {
     if (selectedPages.length === 0 || !editorDocument || busy) return
@@ -1554,6 +1580,18 @@ export function App() {
                 <LoaderCircle className="spin" size={17} />
               ) : (
                 <ScanSearch size={17} />
+              )}
+            </IconButton>
+            <IconButton
+              label={busy === 'excel-exporting' ? 'Exporting Excel…' : 'Export to Excel'}
+              disabled={busy !== null || !analyseSummary}
+              title={analyseSummary ? 'Put each detected table in a separate worksheet' : 'Analyse text before exporting tables to Excel'}
+              onClick={() => void exportExcel()}
+            >
+              {busy === 'excel-exporting' ? (
+                <LoaderCircle className="spin" size={17} />
+              ) : (
+                <FileSpreadsheet size={17} />
               )}
             </IconButton>
             <IconButton

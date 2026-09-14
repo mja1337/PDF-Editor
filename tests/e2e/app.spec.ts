@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { readFile } from 'node:fs/promises'
+import { strFromU8, unzipSync } from 'fflate'
 
 async function resetDeviceStorage(page: Page) {
   await page.evaluate(async () => {
@@ -42,6 +43,29 @@ async function fixtureBytes() {
     font,
   })
   pdf.addPage([360, 540]).drawText('Appendix', { x: 30, y: 480, font })
+  return Buffer.from(await pdf.save())
+}
+
+async function tableFixtureBytes() {
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const rows = [
+    ['Item', 'Qty', 'Amount'],
+    ['Paper', '2', '12.50'],
+    ['Ink', '1', '8.00'],
+  ]
+  for (let pageIndex = 0; pageIndex < 2; pageIndex += 1) {
+    const sheet = pdf.addPage([360, 480])
+    const firstRowY = pageIndex === 0 ? 110 : 440
+    rows.forEach((row, rowIndex) => {
+      row.forEach((value, columnIndex) => {
+        sheet.drawText(
+          pageIndex === 1 && rowIndex > 0 ? `${value}B` : value,
+          { x: 30 + columnIndex * 120, y: firstRowY - rowIndex * 28, size: 12, font },
+        )
+      })
+    })
+  }
   return Buffer.from(await pdf.save())
 }
 
@@ -260,6 +284,35 @@ test('renders page text and analyses it into editable lines', async ({ page }) =
   await expect(
     page.locator('.focused-page').getByRole('button', { name: 'extracted text annotation' }).first(),
   ).toContainText('Rewritten from the list')
+})
+
+test('exports detected tables to Excel after text analysis', async ({ page }) => {
+  await page.goto('./')
+  await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
+    name: 'invoice.pdf',
+    mimeType: 'application/pdf',
+    buffer: await tableFixtureBytes(),
+  })
+
+  const exportButton = page.getByRole('button', { name: 'Export to Excel' })
+  await expect(exportButton).toBeDisabled()
+  await page.getByRole('button', { name: 'Analyse text' }).click()
+  await expect(page.getByText(/lines? found/i)).toBeVisible()
+  await expect(exportButton).toBeEnabled()
+
+  const downloadPromise = page.waitForEvent('download')
+  await exportButton.click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('invoice-tables.xlsx')
+  const outputPath = await download.path()
+  expect(outputPath).toBeTruthy()
+  const files = unzipSync(await readFile(outputPath!))
+  const workbook = strFromU8(files['xl/workbook.xml'])
+  const sheet = strFromU8(files['xl/worksheets/sheet1.xml'])
+  expect(workbook.match(/<sheet /g)).toHaveLength(1)
+  expect(sheet).toContain('Paper')
+  expect(sheet).toContain('PaperB')
+  expect(sheet.match(/>Item</g)).toHaveLength(1)
 })
 
 test('covers analysed text with the sampled page colour', async ({ page }) => {

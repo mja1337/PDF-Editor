@@ -4,19 +4,21 @@ export function IconButton({
   onClick,
   children,
   className = '',
+  title,
 }: {
   label: string
   disabled?: boolean
   onClick: () => void
   children: React.ReactNode
   className?: string
+  title?: string
 }) {
   return (
     <button
       type="button"
       className={`icon-button ${className}`}
       aria-label={label}
-      title={label}
+      title={title ?? label}
       disabled={disabled}
       onClick={onClick}
     >
