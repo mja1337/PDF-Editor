@@ -228,10 +228,41 @@ function ocrAssetsPlugin(): Plugin {
   }
 }
 
+function officeAssetsPlugin(): Plugin {
+  const root = dirname(require.resolve('@matbee/libreoffice-converter/package.json'))
+  const files = ['soffice.js', 'soffice.worker.js', 'soffice.wasm', 'soffice.data', 'browser.worker.global.js']
+  const source = (name: string) => join(root, name.startsWith('browser.') ? 'dist' : 'wasm', name)
+  return {
+    name: 'office-assets',
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        response.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+        response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp')
+        const prefix = `${server.config.base}office/`
+        const url = (request.url ?? '').split('?')[0]
+        const name = url.startsWith(prefix) ? url.slice(prefix.length) : ''
+        if (!files.includes(name)) return next()
+        response.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.wasm') ? 'application/wasm' : 'application/octet-stream')
+        createReadStream(source(name)).pipe(response)
+      })
+    },
+    writeBundle(options) {
+      if (!options.dir) return
+      const dest = join(options.dir, 'office')
+      mkdirSync(dest, { recursive: true })
+      for (const name of files) {
+        if (/\.(wasm|data)$/.test(name)) writeFileSync(join(dest, `${name}.gz`), gzipSync(readFileSync(source(name))))
+        else cpSync(source(name), join(dest, name))
+      }
+    },
+  }
+}
+
 export default defineConfig({
   base: repositoryBase,
   plugins: [
     react(),
+    officeAssetsPlugin(),
     pdfjsAssetsPlugin(),
     ocrAssetsPlugin(),
     VitePWA({
@@ -261,7 +292,8 @@ export default defineConfig({
         globPatterns: [
           '**/*.{html,js,css,svg,mjs,wasm,woff,woff2,bcmap,pfb,ttf,otf,icc,gz}',
         ],
-        globIgnores: ['**/ocr/**'],
+        globIgnores: ['**/ocr/**', '**/office/**'],
+        importScripts: ['office-runtime.js'],
         navigateFallback: `${repositoryBase}index.html`.replace(/\/{2,}/g, '/'),
         navigateFallbackDenylist: [new RegExp(`${escapedBase}ocr/`)],
         cleanupOutdatedCaches: true,

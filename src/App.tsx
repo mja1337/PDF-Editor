@@ -1,3 +1,6 @@
+import { OfficeConversionDialog } from './components/OfficeConversionDialog'
+import { isOfficeFile, OFFICE_ACCEPT, stopOfficeConversion } from './office/conversion'
+import { pendingOffice, type PendingOffice } from './office/pending'
 import {
   ArrowDown,
   ArrowLeft,
@@ -1502,6 +1505,29 @@ export function App() {
     stepSearchMatch,
   ])
 
+  const [officePending, setOfficePending] = useState<(PendingOffice & { resumed?: boolean }) | null>(null)
+  useEffect(() => {
+    if (!sessionStorage.getItem('pdfe-office-handoff')) return
+    void pendingOffice().then((pending) => {
+      if (pending) setOfficePending({ ...pending, resumed: true })
+    }).catch(() => setError('Could not restore the Office file. Please choose it again.'))
+  }, [])
+  const chooseFiles = (files: File[]) => {
+    if (busy || officePending || !files.length) return
+    const office = files.filter(isOfficeFile)
+    if (office.length) {
+      if (files.length !== 1) { setError('Choose one Word or PowerPoint file at a time.'); return }
+      if (editorDocument) { setError('Open a fresh workspace to convert an Office file.'); return }
+      setError(null)
+      setOfficePending({ file: office[0], options: { name: office[0].name.replace(/\.[^.]+$/, '.pdf'), quality: 90, pages: '' } })
+      return
+    }
+    const pdfs = files.filter((file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name))
+    const images = files.filter((file) => /\.(jpe?g|png)$/i.test(file.name) || ['image/jpeg', 'image/png'].includes(file.type))
+    if (pdfs.length === files.length) void loadPdfFiles(pdfs, true)
+    else if (images.length === files.length) void loadImageFiles(images, true)
+    else setError('Choose PDF files, JPEG/PNG images, or one DOC, DOCX, PPT or PPTX file.')
+  }
   const openFilePicker = () => fileInputRef.current?.click()
 
   return (
@@ -1510,12 +1536,13 @@ export function App() {
         ref={fileInputRef}
         className="visually-hidden"
         type="file"
-        accept="application/pdf,.pdf"
+        accept={editorDocument ? "application/pdf,.pdf" : `application/pdf,.pdf,${OFFICE_ACCEPT}`}
         multiple
         aria-label="Choose a PDF"
         onChange={(event) => {
           const files = Array.from(event.target.files ?? [])
-          if (files.length > 0) void loadPdfFiles(files, true)
+          event.target.value = ''
+          chooseFiles(files)
         }}
       />
       <input
@@ -1543,6 +1570,7 @@ export function App() {
         }}
       />
 
+      {officePending && <OfficeConversionDialog file={officePending.file} initialOptions={officePending.options} resumed={officePending.resumed} onClose={() => setOfficePending(null)} onOpen={(file) => { stopOfficeConversion(); setOfficePending(null); void loadPdfFiles([file], true) }} />}
       <header className="topbar">
         <div className="island island-file">
           <span className="brand-mark" aria-label="pdfe" title="pdfe">
@@ -1760,20 +1788,13 @@ export function App() {
             event.preventDefault()
             setIsDraggingFile(false)
             const files = Array.from(event.dataTransfer.files)
-            const pdfFiles = files.filter(
-              (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name),
-            )
-            const imageFiles = files.filter((file) =>
-              ['image/jpeg', 'image/png'].includes(file.type),
-            )
-            if (pdfFiles.length > 0) void loadPdfFiles(pdfFiles, true)
-            else if (imageFiles.length > 0) void loadImageFiles(imageFiles, true)
+            chooseFiles(files)
           }}
         >
           <section className="welcome-panel">
-            <h1>Open a PDF</h1>
+            <h1>Every file starts here.</h1>
             <p className="welcome-copy">
-              Drop a file here. It stays in this browser.
+              Drop a PDF, Word document or PowerPoint. It stays in this browser.
             </p>
             <div className="welcome-actions">
               <button
@@ -1783,7 +1804,7 @@ export function App() {
                 onClick={openFilePicker}
               >
                 <FolderOpen size={19} />
-                {busy === 'opening' ? 'Opening files…' : 'Choose PDF files'}
+                {busy === 'opening' ? 'Opening files…' : 'Choose files'}
               </button>
               <button
                 type="button"

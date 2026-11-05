@@ -1,0 +1,15 @@
+Office conversion engine
+
+@matbee/libreoffice-converter 2.7.2
+License: Mozilla Public License 2.0 (MPL-2.0)
+Source, build instructions and notices:
+https://github.com/matbeedotcom/libreoffice-document-converter/tree/b72a3d584bc28c5111afafcf25def7a24fb5fcb0
+https://www.mozilla.org/MPL/2.0/
+
+Includes LibreOffice compiled to WebAssembly and bundled fonts/resources.
+LibreOffice source and licensing:
+https://www.libreoffice.org/about-us/licenses/
+https://git.libreoffice.org/core
+
+The engine is distributed unchanged from the pinned npm package; its .wasm and
+.data files are gzip-compressed for delivery and decompressed locally.
