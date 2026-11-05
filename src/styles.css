@@ -2155,3 +2155,34 @@ input:focus-visible,
   min-width: 0;
   flex: 1 1 auto;
 }
+
+.office-dialog { width: min(520px, calc(100vw - 32px)); }
+.office-heading { display: flex; align-items: center; gap: 14px; }
+.office-heading h2 { margin: 0; }
+.office-heading p, .office-note { color: var(--muted, #929b98); font-size: 13px; }
+.office-heading p { margin: 5px 0 0; }
+.office-file { display: flex; flex-direction: column; gap: 7px; padding: 18px; margin: 24px 0 16px; background: #ffffff06; border: 1px solid #ffffff15; border-radius: 12px; overflow-wrap: anywhere; }
+.office-file span { font-size: 12px; opacity: .65; }
+.office-description { line-height: 1.6; font-size: 14px; }
+.office-options { border-top: 1px solid #ffffff15; border-bottom: 1px solid #ffffff15; margin: 20px 0 12px; padding: 14px 0; }
+.office-options summary { cursor: pointer; font-size: 14px; }
+.office-options fieldset { display: grid; gap: 16px; border: 0; padding: 20px 0 8px; min-width: 0; }
+.office-options label { display: grid; gap: 7px; font-size: 13px; }
+.office-options input, .office-options select { width: 100%; padding: 10px; background: #ffffff08; border: 1px solid #ffffff25; color: inherit; border-radius: 7px; }
+.office-options select option { color: #111; }
+.office-options small, .office-note { line-height: 1.5; }
+.office-progress { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.office-progress svg { flex-shrink: 0; }
+.office-error { color: #ffae9b; font-size: 14px; }
+.office-dialog .signature-actions { flex-wrap: wrap; margin-top: 24px; }
+.office-options fieldset { grid-template-columns: 1fr 1fr; }
+.office-options label { margin: 0; min-width: 0; }
+.office-options label:first-child, .office-options small { grid-column: 1 / -1; }
+.office-dialog .signature-actions { position: sticky; bottom: -24px; padding: 14px 0; background: #151e1b; }
+@media (max-width: 440px) {
+  .office-options fieldset { grid-template-columns: 1fr; }
+}
+.office-dialog .signature-actions { display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
+.office-dialog .signature-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 10px 16px; border: 1px solid #ffffff25; border-radius: 9px; background: #ffffff08; color: #edf4f1; font: inherit; cursor: pointer; }
+.office-dialog .signature-actions .primary-open-button { background: #147d72; border-color: #147d72; }
+.office-dialog .signature-actions button:disabled { opacity: .55; cursor: wait; }

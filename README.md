@@ -5,6 +5,7 @@ A private, local-first PDF workspace designed for GitHub Pages. Documents are op
 ## Current capabilities
 
 - Open or merge multiple PDFs locally with signature, corruption, password, and size error handling.
+- Convert DOCX, DOC, PPTX and PPT files to PDF locally from the opening screen, with filename, image-quality and page/slide selection options. Download the result or open it in the editor.
 - Convert local JPEG and PNG images into correctly fitted PDF pages.
 - Virtualized page thumbnails and a focused HiDPI page preview.
 - Reorder, rotate, delete, and duplicate pages with stable page identities.
@@ -70,3 +71,13 @@ The current export engine does not rewrite original PDF content streams. Analyse
 ## License
 
 No license has been selected for this repository yet. Add one before accepting external contributions or redistributing the project under defined terms.
+
+## Office conversion
+
+Drop one Word or PowerPoint file on the opening screen, or use **Choose files**. Select **Convert to PDF** with the defaults, or expand **Advanced options** first. Conversion preserves the source page/slide dimensions. The resulting PDF is checked before download or opening in the editor. Inputs are limited to 100 MB; conversion can be cancelled and retried.
+
+The pinned `@matbee/libreoffice-converter` 2.7.2 engine (LibreOffice, MPL-2.0) runs in a dedicated browser worker. Engine assets are copied from npm during the build and served from this site's `office/` directory; there is no conversion service or document upload. The two large assets are gzip-compressed at build time (about 75 MB total) and decompressed and cached on demand by the service worker. They are excluded from the editor's initial precache. Upstream source and build instructions: https://github.com/matbeedotcom/libreoffice-document-converter.
+
+LibreOffice requires cross-origin isolation. Development serves the required headers directly. On GitHub Pages, `office-runtime.js` extends the existing PWA service worker with isolation headers and engine asset caching. The first conversion may reload the app once; its file and settings are temporarily saved in IndexedDB and removed when restored. Conversion then resumes automatically. The rest of the editor remains available offline through its existing precache.
+
+Use a current desktop browser with sufficient memory. The initial download/startup takes longer than subsequent conversions; complex files may still be slow. Unavailable fonts can be substituted, and complex Microsoft Office layouts may differ. Password-protected or damaged inputs may fail. Image-quality settings affect embedded image compression, not source layout. Page/slide ranges are applied to the converted PDF, so the engine still reads the whole input.

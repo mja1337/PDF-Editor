@@ -79,7 +79,7 @@ test('edits and exports a PDF without contacting another origin', async ({ page 
   })
 
   await page.goto('./')
-  await expect(page.getByRole('heading', { name: /open a pdf/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /every file starts here/i })).toBeVisible()
 
   await page.locator('input[aria-label="Choose a PDF"]').setInputFiles({
     name: 'workflow-fixture.pdf',

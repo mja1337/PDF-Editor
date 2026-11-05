@@ -55,9 +55,7 @@ export function OcrConsentDialog({
         </div>
       </dl>
       <p>
-        After that, this browser keeps a copy for later scans. GitHub Pages
-        cannot enable multi-thread WASM, so recognition is single-thread and
-        can be slow on large pages.
+        After that, this browser keeps a copy for later scans. Recognition currently runs single-threaded and can be slow on large pages.
       </p>
       <div className="signature-actions">
         <button type="button" onClick={onDecline}>
