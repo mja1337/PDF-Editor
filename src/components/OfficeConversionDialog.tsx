@@ -1,3 +1,4 @@
+import type { OfficeDownloadProgress } from '../office/downloadProgress'
 import { useEffect, useRef, useState } from 'react'
 import { Download, FileText, LoaderCircle } from 'lucide-react'
 import { convertOffice, MAX_OFFICE_BYTES, parsePages, pdfName, type OfficeOptions } from '../office/conversion'
@@ -14,6 +15,7 @@ export function OfficeConversionDialog({ file, initialOptions, resumed = false, 
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
+  const [download, setDownload] = useState<OfficeDownloadProgress | null>(null)
   const [result, setResult] = useState<File | null>(null)
   const running = !!status
   useEffect(() => {
@@ -36,7 +38,7 @@ export function OfficeConversionDialog({ file, initialOptions, resumed = false, 
       if (resumed && !globalThis.crossOriginIsolated) throw new Error('Your browser could not enable local conversion. Try a current desktop Chrome, Edge, Firefox or Safari browser.')
       if (!await prepareOffice({ file, options }, controller.signal)) return
       controller.signal.throwIfAborted()
-      setResult(await convertOffice(file, options, controller.signal, setStatus))
+      setResult(await convertOffice(file, options, controller.signal, setStatus, setDownload))
     } catch (failure) {
       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'Conversion failed. Please try again.')
     } finally {
@@ -66,6 +68,11 @@ export function OfficeConversionDialog({ file, initialOptions, resumed = false, 
     </>}
     {error && <p className="office-error" role="alert">{error}</p>}
     {running && <p className="office-progress" role="status"><LoaderCircle className="spin" size={18} />{status}</p>}
+    {running && download && <div className="office-download">
+      <div className="office-download-label"><span>{download.complete ? 'Engine downloaded' : 'Loading conversion engine'}</span><span>{download.percent === null ? 'Connecting…' : `${download.percent}%`}</span></div>
+      <progress aria-label="Conversion engine download" max={100} value={download.percent ?? undefined} />
+      <small>{download.complete ? 'Starting the engine locally. Your file is not uploaded.' : 'One-time download. This browser keeps the engine for next time.'}</small>
+    </div>}
     {running && elapsed >= 15 && <p className="office-note">{elapsed}s elapsed. Large or complex presentations can take longer. You can cancel at any time.</p>}
     {result && <p role="status">{result.name} · {formatBytes(result.size)}</p>}
     <div className="signature-actions">

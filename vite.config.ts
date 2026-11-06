@@ -250,10 +250,16 @@ function officeAssetsPlugin(): Plugin {
       if (!options.dir) return
       const dest = join(options.dir, 'office')
       mkdirSync(dest, { recursive: true })
+      const sizes: Record<string, { size: number; compressedSize: number }> = {}
       for (const name of files) {
-        if (/\.(wasm|data)$/.test(name)) writeFileSync(join(dest, `${name}.gz`), gzipSync(readFileSync(source(name))))
-        else cpSync(source(name), join(dest, name))
+        if (/\.(wasm|data)$/.test(name)) {
+          const bytes = readFileSync(source(name))
+          const compressed = gzipSync(bytes)
+          writeFileSync(join(dest, `${name}.gz`), compressed)
+          sizes[name] = { size: bytes.byteLength, compressedSize: compressed.byteLength }
+        } else cpSync(source(name), join(dest, name))
       }
+      writeFileSync(join(dest, 'sizes.json'), JSON.stringify(sizes))
     },
   }
 }

@@ -9,6 +9,15 @@ test('converts Office files locally through the first-visit setup and cached eng
     if (!['127.0.0.1', 'localhost'].includes(new URL(request.url()).hostname)) outside.push(request.url())
   })
   page.on('pageerror', (error) => console.log('PAGE ERROR', error.message))
+  await page.addInitScript(() => {
+    const seen: number[] = []
+    Object.assign(window, { officeDownloadPercentages: seen })
+    const observer = new MutationObserver(() => {
+      const bar = document.querySelector('progress[aria-label="Conversion engine download"]')
+      if (bar?.hasAttribute('value')) seen.push(Number(bar.getAttribute('value')))
+    })
+    observer.observe(document, { subtree: true, attributes: true, childList: true })
+  })
   await page.goto('./')
   await page.locator('input[aria-label="Choose a PDF"]').setInputFiles('tests/fixtures/office/sample.docx')
   await expect(page.getByRole('dialog')).toBeVisible()
@@ -18,6 +27,9 @@ test('converts Office files locally through the first-visit setup and cached eng
   await page.getByRole('button', { name: 'Convert to PDF', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Your PDF is ready' })).toBeVisible({ timeout: 180000 })
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true)
+  const percentages = await page.evaluate(() => (window as Window & { officeDownloadPercentages?: number[] }).officeDownloadPercentages ?? [])
+  expect(percentages.some((value) => value > 0 && value < 100)).toBe(true)
+  expect(percentages).toContain(100)
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Download PDF' }).click()
   const pdf = await download
