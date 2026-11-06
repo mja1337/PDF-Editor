@@ -39,7 +39,8 @@ export async function convertOffice(file: File, options: OfficeOptions, signal: 
   const engine = worker ??= new Worker(`${base}browser.worker.global.js`)
   const request = (type: string, data: Record<string, unknown> = {}) => new Promise<Uint8Array | undefined>((resolve, reject) => {
     const id = ++sequence
-    const timeout = window.setTimeout(() => fail(new Error('Conversion took too long. Try a smaller file.')), 180000)
+    let stage = type === 'convert' ? 'reading the document' : 'preparing the conversion engine'
+    const timeout = window.setTimeout(() => fail(new Error(`Local conversion timed out while ${stage}. Try again to restart the engine, or cancel and try a fresh browser window.`)), 180000)
     const cleanup = () => {
       clearTimeout(timeout)
       engine.removeEventListener('message', receive)
@@ -51,8 +52,13 @@ export async function convertOffice(file: File, options: OfficeOptions, signal: 
     const failed = () => fail(new Error('The conversion engine could not run. Try again in a desktop browser with more available memory.'))
     const receive = (event: MessageEvent) => {
       const message = event.data
-      if (message.type === 'progress') return
       if (type === 'loaded' ? message.type !== 'loaded' : message.id !== id) return
+      if (message.type === 'progress') {
+        const update = officeProgress(type, message.progress?.percent)
+        if (update) { stage = update.stage; progress(update.label) }
+        return
+      }
+      if (!['loaded', 'ready', 'result', 'error'].includes(message.type)) return
       if (message.type === 'error') { fail(new Error('This file could not be converted. It may be damaged, password-protected or unsupported.')); return }
       cleanup()
       resolve(message.data)
@@ -99,4 +105,14 @@ export async function convertOffice(file: File, options: OfficeOptions, signal: 
     stopOfficeConversion()
     throw error
   }
+}
+
+// The engine reports milestones, not measured percentages of total work.
+// In particular, 30% means its synchronous document import has started.
+export function officeProgress(type: string, percent: unknown): { label: string; stage: string } | undefined {
+  if (type !== 'convert' || typeof percent !== 'number' || !Number.isFinite(percent)) return undefined
+  if (percent >= 90) return { label: 'Reading the converted PDF…', stage: 'reading the converted PDF' }
+  if (percent >= 50) return { label: 'Exporting pages / slides to PDF…', stage: 'exporting the PDF' }
+  if (percent >= 30) return { label: 'Loading document pages / slides…', stage: 'loading the document pages / slides' }
+  return { label: 'Reading your Office file…', stage: 'reading the Office file' }
 }
