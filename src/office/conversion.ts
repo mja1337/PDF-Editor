@@ -1,3 +1,4 @@
+import { watchOfficeDownload, type OfficeDownloadProgress } from './downloadProgress'
 
 export const OFFICE_ACCEPT = '.doc,.docx,.ppt,.pptx'
 export const MAX_OFFICE_BYTES = 100 * 1024 * 1024
@@ -30,7 +31,7 @@ export function stopOfficeConversion() {
   ready = false
 }
 
-export async function convertOffice(file: File, options: OfficeOptions, signal: AbortSignal, progress: (text: string) => void): Promise<File> {
+export async function convertOffice(file: File, options: OfficeOptions, signal: AbortSignal, progress: (text: string) => void, downloadProgress: (value: OfficeDownloadProgress | null) => void = () => {}): Promise<File> {
   if (!isOfficeFile(file)) throw new Error('Choose a Word or PowerPoint file.')
   if (!file.size || file.size > MAX_OFFICE_BYTES) throw new Error('Choose a non-empty Office file smaller than 100 MB.')
   parsePages(options.pages)
@@ -73,10 +74,20 @@ export async function convertOffice(file: File, options: OfficeOptions, signal: 
     if (!ready) {
       progress('Preparing the local conversion engine… First use can take a minute.')
       await request('loaded')
-      await request('init', {
-        sofficeJs: `${base}soffice.js`, sofficeWasm: `${base}soffice.wasm`,
-        sofficeData: `${base}soffice.data`, sofficeWorkerJs: `${base}soffice.worker.js`,
+      downloadProgress({ percent: null, complete: false })
+      const unwatch = watchOfficeDownload(base, (value) => {
+        downloadProgress(value)
+        progress(value.complete ? 'Starting conversion engine…' : 'Downloading conversion engine…')
       })
+      try {
+        await request('init', {
+          sofficeJs: `${base}soffice.js`, sofficeWasm: `${base}soffice.wasm`,
+          sofficeData: `${base}soffice.data`, sofficeWorkerJs: `${base}soffice.worker.js`,
+        })
+      } finally {
+        unwatch()
+        downloadProgress(null)
+      }
       ready = true
     }
     progress(`Converting ${file.name}…`)
