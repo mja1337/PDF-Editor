@@ -52,9 +52,9 @@ npm run test:e2e:pages
 
 ## GitHub Pages
 
-The workflow in `.github/workflows/pages.yml` tests and builds the application, then deploys `dist/` with `BASE_PATH=/PDF-Editor/`. Configure **Settings → Pages → Source** to **GitHub Actions** once for the repository.
+The workflow in `.github/workflows/pages.yml` tests and builds the application, then deploys `dist/` using the base path returned by GitHub Pages configuration (currently `/pdfe/`). Repository renames and root custom domains therefore do not require a hard-coded build-path change. Configure **Settings → Pages → Source** to **GitHub Actions** once for the repository.
 
-For a custom domain hosted at its root, build with `BASE_PATH=/` instead.
+For local production builds, set `BASE_PATH=/pdfe/` for the project URL or `BASE_PATH=/` for a root domain. `npm run test:e2e:pages` defaults to `/pdfe/`; set `BASE_PATH` to test another project path. Do not switch Pages to “Deploy from a branch”: that publishes the source tree instead of the built application.
 
 ## Privacy and independence
 

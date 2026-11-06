@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node scripts/e2e.mjs",
-    "test:e2e:pages": "BASE_PATH=/PDF-Editor/ PLAYWRIGHT_BASE_URL=http://127.0.0.1:4173/PDF-Editor/ node scripts/e2e.mjs",
+    "test:e2e:pages": "node scripts/e2e.mjs --pages",
     "generate:ocr-fixtures": "node scripts/e2e.mjs -c playwright.ocr-fixtures.config.ts",
     "test:ocr-bench": "node --require ./tests/ocr-bench/force-simd-lstm.cjs --experimental-strip-types tests/ocr-bench/run-bench.mjs",
     "check": "npm run lint && npm run test && npm run build"
