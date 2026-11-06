@@ -95,3 +95,14 @@ test('cancels engine startup and allows choosing the same file again', async ({ 
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Convert to PDF', exact: true })).toBeEnabled()
 })
+
+
+test('opens the app without a blocked inline script', async ({ page }) => {
+  const cspErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.text().includes('violates the following Content Security Policy')) cspErrors.push(message.text())
+  })
+  await page.goto('./')
+  await expect(page.getByRole('heading', { name: 'Every file starts here.' })).toBeVisible()
+  expect(cspErrors).toEqual([])
+})

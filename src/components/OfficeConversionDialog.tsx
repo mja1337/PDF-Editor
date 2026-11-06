@@ -13,12 +13,20 @@ export function OfficeConversionDialog({ file, initialOptions, resumed = false, 
   const [options, setOptions] = useState<OfficeOptions>(initialOptions ?? { name: pdfName(file.name), quality: 90, pages: '' })
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
+  const [elapsed, setElapsed] = useState(0)
   const [result, setResult] = useState<File | null>(null)
   const running = !!status
+  useEffect(() => {
+    if (!running) return
+    const started = Date.now()
+    const interval = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(interval)
+  }, [running])
   const runRef = useRef<() => void>(() => {})
   const run = async () => {
     if (abort.current) return
     setError('')
+    setElapsed(0)
     const controller = new AbortController()
     abort.current = controller
     try {
@@ -58,6 +66,7 @@ export function OfficeConversionDialog({ file, initialOptions, resumed = false, 
     </>}
     {error && <p className="office-error" role="alert">{error}</p>}
     {running && <p className="office-progress" role="status"><LoaderCircle className="spin" size={18} />{status}</p>}
+    {running && elapsed >= 15 && <p className="office-note">{elapsed}s elapsed. Large or complex presentations can take longer. You can cancel at any time.</p>}
     {result && <p role="status">{result.name} · {formatBytes(result.size)}</p>}
     <div className="signature-actions">
       <button type="button" onClick={close}>{running ? 'Cancel' : 'Close'}</button>
